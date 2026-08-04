@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>מערכת TRACE — סטודיו סקיצה תעשייתית</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root{
+    /* --- neutrals: graphite with a faint blueprint bias --- */
+    --paper:#EFEDE7;
+    --surface:#F7F5F0;
+    --surface-2:#FBFAF6;
+    --edge:#DAD6CC;
+    --edge-strong:#C3BEB1;
+    --ink:#1B1F26;
+    --ink-soft:#4A505A;
+    --ink-mute:#7C818B;
+    /* --- accents from the drafting bench --- */
+    --blueprint:#2E5C86;   /* deep drafting blue */
+    --nonphoto:#5E8FB5;    /* non-photo construction blue */
+    --vermilion:#C8452D;   /* red construction pencil / VP marks */
+    --blueprint-tint:#E3ECF4;
+    --shadow:0 1px 2px rgba(27,31,38,.05), 0 8px 24px rgba(27,31,38,.07);
+    --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",system-ui,"Noto Sans Hebrew",Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","SFMono-Regular",Menlo,"Roboto Mono","Courier New",monospace;
+    --r:10px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0E1218; --surface:#151A21; --surface-2:#1A2029;
+      --edge:#252C36; --edge-strong:#333B46;
+      --ink:#E9E7E1; --ink-soft:#AEB4BD; --ink-mute:#7E858F;
+      --blueprint:#6FA3CC; --nonphoto:#5E8FB5; --vermilion:#E06A50;
+      --blueprint-tint:#182430;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#EFEDE7; --surface:#F7F5F0; --surface-2:#FBFAF6;
+    --edge:#DAD6CC; --edge-strong:#C3BEB1;
+    --ink:#1B1F26; --ink-soft:#4A505A; --ink-mute:#7C818B;
+    --blueprint:#2E5C86; --nonphoto:#5E8FB5; --vermilion:#C8452D;
+    --blueprint-tint:#E3ECF4; --shadow:0 1px 2px rgba(27,31,38,.05), 0 8px 24px rgba(27,31,38,.07);
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E1218; --surface:#151A21; --surface-2:#1A2029;
+    --edge:#252C36; --edge-strong:#333B46;
+    --ink:#E9E7E1; --ink-soft:#AEB4BD; --ink-mute:#7E858F;
+    --blueprint:#6FA3CC; --nonphoto:#5E8FB5; --vermilion:#E06A50;
+    --blueprint-tint:#182430; --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:var(--font-sans); color:var(--ink); background:var(--paper);
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+    padding:clamp(14px,3vw,32px);
+  }
+  .wrap{max-width:1280px; margin:0 auto}
+
+  /* ---------- title block header ---------- */
+  header.titleblock{
+    border:1.5px solid var(--edge-strong); border-radius:var(--r);
+    background:var(--surface); box-shadow:var(--shadow);
+    display:grid; grid-template-columns:1fr auto; gap:10px;
+    padding:16px 20px; margin-bottom:18px;
+  }
+  .brand{display:flex; flex-direction:column; gap:4px}
+  .eyebrow{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:.22em;
+    text-transform:uppercase; color:var(--nonphoto); font-weight:600;
+  }
+  h1{
+    font-size:clamp(20px,3.4vw,30px); margin:0; font-weight:650;
+    letter-spacing:-.01em; text-wrap:balance;
+  }
+  .brand p{margin:2px 0 0; color:var(--ink-soft); font-size:14px; max-width:60ch}
+  .themebtn{
+    align-self:start; font-family:var(--font-mono); font-size:12px;
+    background:transparent; color:var(--ink-soft); border:1px solid var(--edge-strong);
+    border-radius:8px; padding:7px 11px; cursor:pointer; white-space:nowrap;
+  }
+  .themebtn:hover{border-color:var(--nonphoto); color:var(--ink)}
+
+  /* ---------- mode tabs ---------- */
+  .tabs{display:flex; gap:8px; margin-bottom:16px}
+  .tab{
+    flex:0 0 auto; font-family:var(--font-mono); font-size:13px; letter-spacing:.03em;
+    padding:10px 18px; border-radius:9px; cursor:pointer;
+    background:var(--surface); border:1.5px solid var(--edge); color:var(--ink-soft);
+    display:flex; align-items:center; gap:9px; transition:border-color .15s, color .15s;
+  }
+  .tab .dot{width:8px;height:8px;border-radius:50%;background:var(--edge-strong)}
+  .tab[aria-selected="true"]{border-color:var(--blueprint); color:var(--ink); background:var(--surface-2)}
+  .tab[aria-selected="true"] .dot{background:var(--vermilion)}
+
+  /* ---------- layout: controls + board ---------- */
+  .studio{display:grid; grid-template-columns:340px 1fr; gap:18px; align-items:start}
+  @media (max-width:900px){ .studio{grid-template-columns:1fr} }
+
+  .panel{
+    background:var(--surface); border:1.5px solid var(--edge); border-radius:var(--r);
+    box-shadow:var(--shadow); padding:18px; display:flex; flex-direction:column; gap:18px;
+  }
+  .qgroup{display:flex; flex-direction:column; gap:9px}
+  .qgroup > label.qlabel{
+    font-size:15px; font-weight:600; color:var(--ink); display:flex; align-items:baseline; gap:8px;
+  }
+  .qlabel .idx{
+    font-family:var(--font-mono); font-size:11px; color:var(--nonphoto);
+    border:1px solid var(--edge-strong); border-radius:5px; padding:1px 6px;
+  }
+  .hint{font-size:12.5px; color:var(--ink-mute); margin:-3px 0 2px}
+
+  /* segmented choices */
+  .seg{display:flex; flex-wrap:wrap; gap:7px}
+  .seg button{
+    font-family:var(--font-sans); font-size:13.5px; color:var(--ink-soft);
+    background:var(--surface-2); border:1.5px solid var(--edge); border-radius:8px;
+    padding:8px 12px; cursor:pointer; transition:all .13s;
+  }
+  .seg button:hover{border-color:var(--nonphoto)}
+  .seg button[aria-pressed="true"]{
+    background:var(--blueprint-tint); border-color:var(--blueprint); color:var(--ink); font-weight:600;
+  }
+
+  .rangewrap{display:flex; align-items:center; gap:12px}
+  input[type=range]{flex:1; accent-color:var(--blueprint); height:4px}
+  .rangeval{font-family:var(--font-mono); font-size:13px; color:var(--ink); min-width:2.4em; text-align:center;
+    background:var(--surface-2); border:1px solid var(--edge); border-radius:6px; padding:2px 0; font-variant-numeric:tabular-nums}
+
+  .toggle{display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 12px; background:var(--surface-2); border:1.5px solid var(--edge); border-radius:8px; cursor:pointer}
+  .toggle:hover{border-color:var(--nonphoto)}
+  .toggle span{font-size:13.5px; color:var(--ink-soft)}
+  .switch{width:38px;height:22px;border-radius:11px;background:var(--edge-strong);position:relative;transition:background .15s;flex:0 0 auto}
+  .switch::after{content:"";position:absolute;top:2px;inline-size:18px;block-size:18px;border-radius:50%;background:#fff;inset-inline-start:2px;transition:inset-inline-start .15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  .toggle[aria-pressed="true"] .switch{background:var(--blueprint)}
+  .toggle[aria-pressed="true"] .switch::after{inset-inline-start:18px}
+
+  .actions{display:flex; flex-direction:column; gap:9px; border-top:1px dashed var(--edge-strong); padding-top:16px}
+  .row{display:flex; gap:9px}
+  .btn{
+    font-family:var(--font-sans); font-size:14px; font-weight:600; cursor:pointer;
+    border-radius:9px; padding:11px 14px; border:1.5px solid transparent; flex:1;
+    display:flex; align-items:center; justify-content:center; gap:8px; transition:filter .13s, border-color .13s;
+  }
+  .btn.primary{background:var(--blueprint); color:#fff}
+  .btn.primary:hover{filter:brightness(1.07)}
+  .btn.ghost{background:transparent; color:var(--ink); border-color:var(--edge-strong)}
+  .btn.ghost:hover{border-color:var(--nonphoto)}
+  .btn.vermil{background:transparent;color:var(--vermilion);border-color:var(--vermilion)}
+  .btn.vermil:hover{background:var(--vermilion);color:#fff}
+  .btn svg{width:16px;height:16px}
+
+  /* ---------- drawing board ---------- */
+  .board-wrap{position:relative}
+  .board{
+    background:#fff; border:1.5px solid var(--edge-strong); border-radius:var(--r);
+    box-shadow:var(--shadow); overflow:hidden; position:relative;
+    aspect-ratio:4/3;
+  }
+  .board svg{display:block; width:100%; height:100%}
+  .board-meta{
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    margin-top:10px; font-family:var(--font-mono); font-size:12px; color:var(--ink-mute);
+    flex-wrap:wrap;
+  }
+  .board-meta .chip{
+    background:var(--surface); border:1px solid var(--edge); border-radius:6px;
+    padding:3px 9px; color:var(--ink-soft); font-variant-numeric:tabular-nums;
+  }
+  .board-meta .chip b{color:var(--ink); font-weight:600}
+
+  /* ---------- prompt / real-product mode ---------- */
+  textarea, input[type=text]{
+    width:100%; font-family:var(--font-sans); font-size:14px; color:var(--ink);
+    background:var(--surface-2); border:1.5px solid var(--edge); border-radius:8px; padding:10px 12px;
+  }
+  textarea{min-height:70px; resize:vertical; line-height:1.55}
+  .promptout{
+    background:#0E1218; color:#E9E7E1; border-radius:var(--r); border:1.5px solid var(--edge-strong);
+    padding:16px; font-family:var(--font-mono); font-size:13px; line-height:1.65; white-space:pre-wrap;
+    position:relative; word-break:break-word;
+  }
+  :root[data-theme="light"] .promptout{background:#161B22}
+  .promptout .tag{
+    font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:#7FB3D5; display:block; margin-bottom:8px;
+  }
+  .copybtn{position:absolute; inset-inline-end:12px; inset-block-start:12px; font-family:var(--font-mono);
+    font-size:11px; background:rgba(255,255,255,.08); color:#E9E7E1; border:1px solid rgba(255,255,255,.2);
+    border-radius:6px; padding:5px 9px; cursor:pointer}
+  .copybtn:hover{background:rgba(255,255,255,.16)}
+
+  /* ---------- workflow footer ---------- */
+  .workflow{
+    margin-top:20px; background:var(--surface); border:1.5px solid var(--edge); border-radius:var(--r);
+    padding:18px 20px; box-shadow:var(--shadow);
+  }
+  .workflow h2{font-size:15px; margin:0 0 12px; display:flex; align-items:center; gap:9px}
+  .workflow h2 .idx{font-family:var(--font-mono);font-size:11px;color:var(--nonphoto)}
+  .steps{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px}
+  .step{display:flex; gap:11px; align-items:flex-start}
+  .step .n{
+    font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--vermilion);
+    border:1.5px solid var(--vermilion); border-radius:7px; width:26px; height:26px;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+  }
+  .step p{margin:0; font-size:13px; color:var(--ink-soft)}
+  .step p b{color:var(--ink); display:block; margin-bottom:2px; font-size:13.5px}
+
+  .hidden{display:none !important}
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
+  :focus-visible{outline:2px solid var(--vermilion); outline-offset:2px}
+</style>
+</head>
+<body>
+
+<div class="wrap" dir="rtl" lang="he">
+
+  <header class="titleblock">
+    <div class="brand">
+      <span class="eyebrow">Industrial Sketch Studio · Trace System</span>
+      <h1>מערכת TRACE — סטודיו סקיצה</h1>
+      <p>עונים על כמה שאלות, מקבלים גיליון קווים נקי לייבוא ל‑Procreate. תרגול trace עקבי בונה זיכרון‑שרירי לצורות בפרספקטיבה — הבסיס של כל סקיצת מוצר.</p>
+    </div>
+    <button class="themebtn" id="themeBtn" type="button">◐ ערכת נושא</button>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="מצב עבודה">
+    <button class="tab" role="tab" id="tab-fund" aria-selected="true" aria-controls="mode-fund">
+      <span class="dot"></span> יסודות — קווים ל‑trace
+    </button>
+    <button class="tab" role="tab" id="tab-prod" aria-selected="false" aria-controls="mode-prod">
+      <span class="dot"></span> מוצר אמיתי — פרומפט לרפרנס
+    </button>
+  </div>
+
+  <!-- ===================== MODE: FUNDAMENTALS ===================== -->
+  <section id="mode-fund" role="tabpanel" aria-labelledby="tab-fund">
+    <div class="studio">
+
+      <!-- controls / the questions -->
+      <div class="panel" id="fundPanel">
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">01</span> מה נתרגל היום?</label>
+          <div class="seg" id="subjectSeg" role="group">
+            <button data-val="mixed" aria-pressed="true">חבורת פרימיטיבים</button>
+            <button data-val="box">קופסה</button>
+            <button data-val="cylinder">גליל</button>
+            <button data-val="cone">חרוט</button>
+            <button data-val="sphere">כדור</button>
+            <button data-val="ellipse">מטח אליפסות</button>
+          </div>
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">02</span> איזו פרספקטיבה?</label>
+          <p class="hint">מספר נקודות המגוז על קו האופק.</p>
+          <div class="seg" id="perspSeg" role="group">
+            <button data-val="1" aria-pressed="false">נקודה אחת</button>
+            <button data-val="2" aria-pressed="true">שתי נקודות</button>
+            <button data-val="3" aria-pressed="false">שלוש נקודות</button>
+          </div>
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">03</span> כמה צורות בגיליון?</label>
+          <div class="rangewrap">
+            <input type="range" id="countRange" min="1" max="7" value="3">
+            <span class="rangeval" id="countVal">3</span>
+          </div>
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">04</span> משקל קו</label>
+          <div class="rangewrap">
+            <input type="range" id="weightRange" min="2" max="7" value="4" step="0.5">
+            <span class="rangeval" id="weightVal">4</span>
+          </div>
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">05</span> עזרי בנייה</label>
+          <p class="hint">קווי מגוז וסימוני נקודות בכחול לא‑מצלם — לתרגול הבנייה עצמה.</p>
+          <div class="toggle" id="guidesToggle" role="button" aria-pressed="true" tabindex="0">
+            <span>הצג קווי בנייה כחולים</span><div class="switch"></div>
+          </div>
+          <div class="toggle" id="hiddenToggle" role="button" aria-pressed="true" tabindex="0">
+            <span>הצג קווים נסתרים (מקווקו)</span><div class="switch"></div>
+          </div>
+          <div class="toggle" id="gridToggle" role="button" aria-pressed="false" tabindex="0">
+            <span>רשת רקע עדינה</span><div class="switch"></div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <div class="row">
+            <button class="btn ghost" id="newSheetBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6"/></svg>
+              גיליון חדש
+            </button>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="pngBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+              הורד PNG ל‑Procreate
+            </button>
+            <button class="btn ghost" id="svgBtn" type="button" style="flex:0 0 auto">SVG</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- the drawing board -->
+      <div class="board-wrap">
+        <div class="board" id="board" aria-label="גיליון קווים לתרגול"></div>
+        <div class="board-meta">
+          <span class="chip">תרגיל: <b id="metaEx">—</b></span>
+          <span class="chip">פרספקטיבה: <b id="metaP">—</b></span>
+          <span class="chip">גיליון #<b id="metaSeed">—</b></span>
+          <span class="chip" id="metaDate">—</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== MODE: REAL PRODUCT ===================== -->
+  <section id="mode-prod" role="tabpanel" aria-labelledby="tab-prod" class="hidden">
+    <div class="studio">
+      <div class="panel">
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">01</span> איזה מוצר?</label>
+          <p class="hint">אובייקט תעשייתי אמיתי לתרגול — ככל שיותר ספציפי, הרפרנס טוב יותר.</p>
+          <input type="text" id="prodName" placeholder="למשל: מכונת אספרסו, אוזניות over‑ear, כיסא משרדי, מברגה">
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">02</span> זווית מבט</label>
+          <div class="seg" id="angleSeg" role="group">
+            <button data-val="three-quarter front view, slight high angle" aria-pressed="true">שלושת‑רבעי</button>
+            <button data-val="straight side profile view">פרופיל צד</button>
+            <button data-val="front elevation, orthographic">חזית ישרה</button>
+            <button data-val="top-down flat lay view">מבט על</button>
+          </div>
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">03</span> סוג הרפרנס</label>
+          <p class="hint">לתרגול trace — ציור קו נקי הכי מתאים. צילום סטודיו נותן חומר לצללים.</p>
+          <div class="seg" id="styleSeg" role="group">
+            <button data-val="line" aria-pressed="true">ציור קו נקי</button>
+            <button data-val="studio">צילום סטודיו</button>
+            <button data-val="ortho">שרטוט אורתוגרפי</button>
+          </div>
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">04</span> רמת פירוט</label>
+          <div class="seg" id="detailSeg" role="group">
+            <button data-val="minimal, essential forms only, no small details" aria-pressed="false">מינימלי</button>
+            <button data-val="moderate detail, main features visible" aria-pressed="true">בינוני</button>
+            <button data-val="high detail, buttons seams and material transitions" aria-pressed="false">גבוה</button>
+          </div>
+        </div>
+
+        <div class="qgroup">
+          <label class="qlabel"><span class="idx">05</span> חומר / אופי (אופציונלי)</label>
+          <input type="text" id="prodMat" placeholder="למשל: אלומיניום מוברש ופלסטיק מט, בהשראת Braun / Dieter Rams">
+        </div>
+
+        <div class="actions">
+          <button class="btn primary" id="buildPromptBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M12 4v16"/></svg>
+            בנה פרומפט
+          </button>
+        </div>
+      </div>
+
+      <div class="board-wrap">
+        <div class="promptout" id="promptPrimary">
+          <span class="tag">Prompt — reference for trace</span>
+          <button class="copybtn" data-target="promptPrimaryText" type="button">העתק</button>
+          <div id="promptPrimaryText">מלאו את השאלות ולחצו «בנה פרומפט» — ואוציא לכם פרומפט מוכן להדבקה במחולל תמונות.</div>
+        </div>
+        <div class="promptout" id="promptAlt" style="margin-top:14px">
+          <span class="tag">Variant — cleaner line-art (best to trace)</span>
+          <button class="copybtn" data-target="promptAltText" type="button">העתק</button>
+          <div id="promptAltText">—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== WORKFLOW ===================== -->
+  <div class="workflow">
+    <h2><span class="idx">FLOW</span> מהגיליון ל‑Procreate</h2>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><p><b>ייצא</b>הורד PNG (או השתמש בפרומפט לרפרנס), ושמור לתמונות ב‑iPad.</p></div>
+      <div class="step"><div class="n">2</div><p><b>ייבא</b>ב‑Procreate: פעולות → הוסף → הכנס תמונה, על קנבס חדש.</p></div>
+      <div class="step"><div class="n">3</div><p><b>שכבה חדשה</b>פתח שכבה מעל הרפרנס, ואם רוצים — הורד את שקיפות שכבת הרפרנס ל‑40%.</p></div>
+      <div class="step"><div class="n">4</div><p><b>עבור על הקווים</b>trace איטי ובטוח. אחר‑כך כבה את הרפרנס ונסה לשחזר מהזיכרון.</p></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const VW = 1600, VH = 1200;
+
+  /* ---------- seeded RNG ---------- */
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+  /* ---------- geometry helpers ---------- */
+  function lineInt(p1,p2,p3,p4){
+    const d=(p1.x-p2.x)*(p3.y-p4.y)-(p1.y-p2.y)*(p3.x-p4.x);
+    if(Math.abs(d)<1e-9) return null;
+    const t=((p1.x-p3.x)*(p3.y-p4.y)-(p1.y-p3.y)*(p3.x-p4.x))/d;
+    return {x:p1.x+t*(p2.x-p1.x), y:p1.y+t*(p2.y-p1.y)};
+  }
+  function vAt(x,a,b){ // y on line a-b at given x
+    if(Math.abs(b.x-a.x)<1e-9) return {x,y:a.y};
+    const t=(x-a.x)/(b.x-a.x); return {x, y:a.y+t*(b.y-a.y)};
+  }
+  const lerp=(a,b,t)=>({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t});
+
+  /* ---------- SVG element builders (strings) ---------- */
+  function seg(a,b,cls){return `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" class="${cls}"/>`;}
+  function poly(pts,cls){return `<polyline points="${pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ')}" class="${cls}" fill="none"/>`;}
+  function ell(cx,cy,rx,ry,cls){return `<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${Math.abs(rx).toFixed(1)}" ry="${Math.abs(ry).toFixed(1)}" class="${cls}" fill="none"/>`;}
+  // half ellipse (front or back) as path, for hidden/visible arcs
+  function halfEll(cx,cy,rx,ry,bottom,cls){
+    const sweep = bottom?1:0;
+    return `<path d="M ${(cx-rx).toFixed(1)} ${cy.toFixed(1)} A ${Math.abs(rx).toFixed(1)} ${Math.abs(ry).toFixed(1)} 0 0 ${sweep} ${(cx+rx).toFixed(1)} ${cy.toFixed(1)}" class="${cls}" fill="none"/>`;
+  }
+  function dot(p,cls){return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9" class="${cls}"/>`;}
+
+  // ellipse "degree" grows with distance from horizon (0 flat -> 1 round)
+  function degByHorizon(cy,hz){ return Math.max(0.12, Math.min(0.92, Math.abs(cy-hz)/560)); }
+
+  /* ---------- primitives ---------- */
+  function boxScene(o){ // o: {cx,cy,w,h, hz, vpL,vpR, mode, rng}
+    const M=[],C=[],Hd=[];
+    if(o.mode==="1"){
+      const vp = o.vp; // single vanishing point
+      const w=o.w, h=o.h, x=o.cx-w/2, y=o.cy-h/2;
+      const f = 0.34 + o.rng()*0.12; // depth fraction toward VP
+      const corners=[{x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h}];
+      const back=corners.map(c=>lerp(c,vp,f));
+      // front face
+      M.push(poly([corners[0],corners[1],corners[2],corners[3],corners[0]],"m"));
+      // connectors + back
+      for(let i=0;i<4;i++){ (i<2||i===3? M:Hd).push(seg(corners[i],back[i], i===2? "hd":"m")); }
+      // visible back edges (top + right assumed visible)
+      M.push(seg(back[0],back[1],"m")); M.push(seg(back[1],back[2],"m"));
+      Hd.push(seg(back[2],back[3],"hd")); Hd.push(seg(back[3],back[0],"hd"));
+      // guides to vp
+      corners.forEach(c=>C.push(seg(c,vp,"c")));
+      return {M,C,Hd};
+    }
+    // 2-point
+    const vpL=o.vpL, vpR=o.vpR;
+    const Atop={x:o.cx, y:o.cy-o.h/2}, Abot={x:o.cx, y:o.cy+o.h/2};
+    const xR=o.cx + o.w*(0.55+o.rng()*0.25);
+    const xL=o.cx - o.w*(0.55+o.rng()*0.25);
+    const Rtop=vAt(xR,Atop,vpR), Rbot=vAt(xR,Abot,vpR);
+    const Ltop=vAt(xL,Atop,vpL), Lbot=vAt(xL,Abot,vpL);
+    const Btop=lineInt(Rtop,vpL,Ltop,vpR);
+    const Bbot=lineInt(Rbot,vpL,Lbot,vpR);
+    // visible: front vertical, side verticals, top edges, near bottom edges
+    M.push(seg(Atop,Abot,"m"));
+    M.push(seg(Rtop,Rbot,"m"));
+    M.push(seg(Ltop,Lbot,"m"));
+    M.push(seg(Atop,Rtop,"m")); M.push(seg(Atop,Ltop,"m"));
+    M.push(seg(Abot,Rbot,"m")); M.push(seg(Abot,Lbot,"m"));
+    if(Btop){ M.push(seg(Rtop,Btop,"m")); M.push(seg(Ltop,Btop,"m")); }
+    // hidden back
+    if(Bbot){
+      Hd.push(seg(Btop||Rtop,Bbot,"hd"));
+      Hd.push(seg(Rbot,Bbot,"hd")); Hd.push(seg(Lbot,Bbot,"hd"));
+    }
+    // construction to VPs
+    [Atop,Abot,Rtop,Rbot,Ltop,Lbot].forEach(p=>{ C.push(seg(p,vpL,"c")); C.push(seg(p,vpR,"c")); });
+    return {M,C,Hd};
+  }
+
+  function threePointBox(o){
+    const M=[],C=[],Hd=[];
+    const vpL=o.vpL, vpR=o.vpR, vpV=o.vpV;
+    const Atop={x:o.cx, y:o.cy-o.h/2};
+    const Abot=lerp(Atop, vpV, (o.h)/ (Math.hypot(vpV.x-Atop.x,vpV.y-Atop.y)) * 0.9);
+    // front vertical converges toward vertical VP
+    const xR=o.cx + o.w*0.6, xL=o.cx - o.w*0.6;
+    const Rtop=vAt(xR,Atop,vpR), Ltop=vAt(xL,Atop,vpL);
+    const Rbot=lineInt(Rtop,vpV,Abot,vpR);
+    const Lbot=lineInt(Ltop,vpV,Abot,vpL);
+    const Btop=lineInt(Rtop,vpL,Ltop,vpR);
+    M.push(seg(Atop,Abot,"m"),seg(Atop,Rtop,"m"),seg(Atop,Ltop,"m"));
+    if(Rbot) M.push(seg(Rtop,Rbot,"m"),seg(Abot,Rbot,"m"));
+    if(Lbot) M.push(seg(Ltop,Lbot,"m"),seg(Abot,Lbot,"m"));
+    if(Btop) M.push(seg(Rtop,Btop,"m"),seg(Ltop,Btop,"m"));
+    [Atop,Rtop,Ltop].forEach(p=>{C.push(seg(p,vpL,"c"),seg(p,vpR,"c"));});
+    [Atop,Rtop,Ltop].forEach(p=>C.push(seg(p,vpV,"c")));
+    return {M,C,Hd};
+  }
+
+  function cylinderScene(o){
+    const M=[],C=[],Hd=[];
+    const cx=o.cx, rx=o.w/2;
+    const topY=o.cy-o.h/2, botY=o.cy+o.h/2;
+    const ryTop=rx*degByHorizon(topY,o.hz);
+    const ryBot=rx*degByHorizon(botY,o.hz);
+    // side walls
+    M.push(seg({x:cx-rx,y:topY},{x:cx-rx,y:botY},"m"));
+    M.push(seg({x:cx+rx,y:topY},{x:cx+rx,y:botY},"m"));
+    // top ellipse full
+    M.push(ell(cx,topY,rx,ryTop,"m"));
+    // bottom: front arc visible, back arc hidden
+    M.push(halfEll(cx,botY,rx,ryBot,true,"m"));
+    Hd.push(halfEll(cx,botY,rx,ryBot,false,"hd"));
+    // minor axis guide
+    C.push(seg({x:cx,y:topY-ryTop-20},{x:cx,y:botY+ryBot+20},"c"));
+    return {M,C,Hd};
+  }
+
+  function coneScene(o){
+    const M=[],C=[],Hd=[];
+    const cx=o.cx, rx=o.w/2, baseY=o.cy+o.h/2, apex={x:cx, y:o.cy-o.h/2};
+    const ry=rx*degByHorizon(baseY,o.hz);
+    M.push(ell(cx,baseY,rx,ry,"m"));
+    M.push(seg(apex,{x:cx-rx,y:baseY},"m"));
+    M.push(seg(apex,{x:cx+rx,y:baseY},"m"));
+    C.push(seg(apex,{x:cx,y:baseY},"c"));
+    return {M,C,Hd};
+  }
+
+  function sphereScene(o){
+    const M=[],C=[]; const cx=o.cx, cy=o.cy, r=Math.min(o.w,o.h)/2;
+    M.push(`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" class="m" fill="none"/>`);
+    // cross-contours
+    const dv=0.32, dh=degByHorizon(cy,o.hz);
+    M.push(ell(cx,cy,r*dv,r,"c"));        // vertical great circle
+    M.push(ell(cx,cy,r,r*dh,"c"));        // horizontal (equator)
+    C.push(seg({x:cx-r,y:cy},{x:cx+r,y:cy},"c"));
+    C.push(seg({x:cx,y:cy-r},{x:cx,y:cy+r},"c"));
+    return {M,C,Hd:[]};
+  }
+
+  function ellipseDrill(o){
+    const M=[],C=[]; const rng=o.rng;
+    const rows = o.count>3?2:1;
+    const perRow = 6;
+    const angle = (rng()*30-15)*Math.PI/180;
+    for(let r=0;r<rows;r++){
+      const baseY = VH*(0.34)+r*VH*0.34;
+      const ax={x:Math.cos(angle),y:Math.sin(angle)};
+      // minor-axis guide line across the row
+      const start={x:VW*0.12, y:baseY - Math.tan(angle)*(VW*0.38)};
+      const end={x:VW*0.88, y:baseY + Math.tan(angle)*(VW*0.38)};
+      C.push(seg(start,end,"c"));
+      for(let i=0;i<perRow;i++){
+        const t=(i+0.5)/perRow;
+        const c=lerp(start,end,t);
+        const deg=0.15+ (i/(perRow-1))*0.7;
+        const rx=90; const ry=rx*deg;
+        // rotate ellipse to align minor axis perpendicular to guide
+        const rot=(angle*180/Math.PI);
+        M.push(`<ellipse cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" rx="${rx}" ry="${ry.toFixed(1)}" class="m" fill="none" transform="rotate(${(rot+90).toFixed(1)} ${c.x.toFixed(1)} ${c.y.toFixed(1)})"/>`);
+      }
+    }
+    return {M,C,Hd:[]};
+  }
+
+  /* ---------- scene composer ---------- */
+  function buildScene(cfg){
+    const rng=mulberry32(cfg.seed);
+    const hz=VH*(0.44+ (rng()*0.06));
+    const vpL={x:-VW*0.55, y:hz}, vpR={x:VW*1.55, y:hz};
+    const vp1={x:VW*(0.42+rng()*0.16), y:hz};
+    const vpV={x:VW*(0.5+ (rng()*0.1-0.05)), y: hz + VH*1.9}; // low vertical VP
+    let M=[],C=[],Hd=[];
+
+    if(cfg.subject==="ellipse"){
+      const r=ellipseDrill({count:cfg.count,rng});
+      M=r.M;C=r.C;Hd=r.Hd;
+    } else {
+      const n=cfg.count;
+      // lay out n forms across the sheet with jitter
+      for(let i=0;i<n;i++){
+        const col=(n===1)?0.5:(0.16 + (i/(Math.max(1,n-1)))*0.68);
+        const cx=VW*col + (rng()*80-40);
+        const baseScale = n>=5?0.62 : n>=3?0.8 : 1;
+        const w=(150+rng()*90)*baseScale;
+        const h=(200+rng()*140)*baseScale;
+        const cy = hz + (rng()*260-40); // sit around/below horizon
+        let kind=cfg.subject;
+        if(cfg.subject==="mixed"){ kind=["box","cylinder","cone","sphere"][Math.floor(rng()*4)]; }
+        let r;
+        const o={cx,cy,w:kind==="sphere"?Math.max(w,h)*0.8:w, h, hz, vpL,vpR, vp:vp1, vpV, mode:cfg.mode, rng};
+        if(kind==="box") r = cfg.mode==="3"? threePointBox(o) : boxScene(o);
+        else if(kind==="cylinder") r=cylinderScene(o);
+        else if(kind==="cone") r=coneScene(o);
+        else r=sphereScene(o);
+        M=M.concat(r.M); C=C.concat(r.C); Hd=Hd.concat(r.Hd);
+      }
+    }
+
+    // horizon + VP markers (construction layer)
+    const markers=[];
+    if(cfg.subject!=="ellipse" && cfg.subject!=="sphere"){
+      C.unshift(seg({x:0,y:hz},{x:VW,y:hz},"cH"));
+      if(cfg.mode==="1"){ markers.push(dot(vp1,"vp")); }
+      else {
+        // clamp VP markers to visible strip near edges
+        markers.push(dot({x:24,y:hz},"vp")); markers.push(dot({x:VW-24,y:hz},"vp"));
+        if(cfg.mode==="3") markers.push(dot({x:vpV.x,y:VH-24},"vp"));
+      }
+    }
+    return {M,C,Hd,markers,hz};
+  }
+
+  /* ---------- SVG assembly (self-contained, always white paper) ---------- */
+  function renderSVG(cfg){
+    const sc=buildScene(cfg);
+    const w=cfg.weight;
+    const grid = cfg.grid ? gridPattern() : "";
+    const guides = cfg.guides ? (sc.C.join("")+sc.markers.join("")) : "";
+    const hidden = cfg.hidden ? sc.Hd.join("") : "";
+    const title = titleBlock(cfg);
+    const css = `
+      .m{stroke:#1B1F26;stroke-width:${w};stroke-linecap:round;stroke-linejoin:round}
+      .hd{stroke:#B9C0C9;stroke-width:${(w*0.7).toFixed(1)};stroke-dasharray:${(w*2.5).toFixed(0)} ${(w*2.5).toFixed(0)};stroke-linecap:round}
+      .c{stroke:#8FB8D6;stroke-width:1.5;opacity:.85}
+      .cH{stroke:#8FB8D6;stroke-width:2.2}
+      .vp{fill:#C8452D}
+      .grid line{stroke:#EDEBE5;stroke-width:1}
+      .tb{fill:#3A3F46;font-family:ui-monospace,Menlo,monospace}
+      .tbBox{fill:none;stroke:#D7D2C7;stroke-width:1.5}
+    `;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VW} ${VH}" width="${VW}" height="${VH}">`
+      + `<style>${css}</style>`
+      + `<rect x="0" y="0" width="${VW}" height="${VH}" fill="#ffffff"/>`
+      + grid
+      + `<g class="guides">${guides}</g>`
+      + `<g class="hiddenL">${hidden}</g>`
+      + `<g class="mainL">${sc.M.join("")}</g>`
+      + title
+      + `</svg>`;
+  }
+
+  function gridPattern(){
+    let g='<g class="grid">';
+    for(let x=0;x<=VW;x+=80) g+=`<line x1="${x}" y1="0" x2="${x}" y2="${VH}"/>`;
+    for(let y=0;y<=VH;y+=80) g+=`<line x1="0" y1="${y}" x2="${VW}" y2="${y}"/>`;
+    return g+'</g>';
+  }
+
+  function titleBlock(cfg){
+    const names={mixed:"PRIMITIVES",box:"BOX",cylinder:"CYLINDER",cone:"CONE",sphere:"SPHERE",ellipse:"ELLIPSE DRILL"};
+    const persp = cfg.subject==="ellipse"?"—":(cfg.mode+"-POINT");
+    const d = cfg.date;
+    const x=VW-430, y=VH-110;
+    return `<g>`
+      + `<rect x="${x}" y="${y}" width="410" height="88" class="tbBox"/>`
+      + `<line x1="${x}" y1="${y+30}" x2="${x+410}" y2="${y+30}" class="tbBox"/>`
+      + `<line x1="${x+205}" y1="${y+30}" x2="${x+205}" y2="${y+88}" class="tbBox"/>`
+      + `<text x="${x+14}" y="${y+20}" class="tb" font-size="16" letter-spacing="3">TRACE STUDIO · ${names[cfg.subject]}</text>`
+      + `<text x="${x+14}" y="${y+54}" class="tb" font-size="13">PERSP  ${persp}</text>`
+      + `<text x="${x+14}" y="${y+76}" class="tb" font-size="13">SHEET  #${cfg.seed}</text>`
+      + `<text x="${x+219}" y="${y+54}" class="tb" font-size="13">FORMS  ${cfg.subject==="ellipse"?"12":cfg.count}</text>`
+      + `<text x="${x+219}" y="${y+76}" class="tb" font-size="13">${d}</text>`
+      + `</g>`;
+  }
+
+  /* ---------- state + wiring ---------- */
+  const state={subject:"mixed", mode:"2", count:3, weight:4, guides:true, hidden:true, grid:false, seed: 1000+Math.floor(Math.random()*8999)};
+  let currentSVG="";
+
+  function todayStr(){const d=new Date();const p=n=>String(n).padStart(2,"0");return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}`;}
+
+  function render(){
+    const cfg={...state, date:todayStr()};
+    currentSVG=renderSVG(cfg);
+    $("#board").innerHTML=currentSVG;
+    const names={mixed:"פרימיטיבים",box:"קופסה",cylinder:"גליל",cone:"חרוט",sphere:"כדור",ellipse:"אליפסות"};
+    $("#metaEx").textContent=names[state.subject];
+    $("#metaP").textContent = state.subject==="ellipse" ? "—" : (state.mode==="1"?"נקודה 1":state.mode==="2"?"2 נקודות":"3 נקודות");
+    $("#metaSeed").textContent=state.seed;
+    $("#metaDate").textContent=todayStr();
+  }
+
+  // segmented groups
+  function wireSeg(id,key,cast){
+    const el=$(id); if(!el) return;
+    el.addEventListener("click",e=>{
+      const b=e.target.closest("button"); if(!b) return;
+      [...el.querySelectorAll("button")].forEach(x=>x.setAttribute("aria-pressed", x===b?"true":"false"));
+      state[key]= cast? cast(b.dataset.val): b.dataset.val;
+      render();
+    });
+  }
+  wireSeg("#subjectSeg","subject");
+  wireSeg("#perspSeg","mode");
+
+  $("#countRange").addEventListener("input",e=>{state.count=+e.target.value;$("#countVal").textContent=e.target.value;render();});
+  $("#weightRange").addEventListener("input",e=>{state.weight=+e.target.value;$("#weightVal").textContent=e.target.value;render();});
+
+  function wireToggle(id,key){
+    const el=$(id);
+    const flip=()=>{state[key]=!state[key];el.setAttribute("aria-pressed",String(state[key]));render();};
+    el.addEventListener("click",flip);
+    el.addEventListener("keydown",e=>{if(e.key===" "||e.key==="Enter"){e.preventDefault();flip();}});
+  }
+  wireToggle("#guidesToggle","guides");
+  wireToggle("#hiddenToggle","hidden");
+  wireToggle("#gridToggle","grid");
+
+  $("#newSheetBtn").addEventListener("click",()=>{state.seed=1000+Math.floor(Math.random()*8999);render();});
+
+  /* ---------- export ---------- */
+  function download(blob,name){
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+  }
+  $("#svgBtn").addEventListener("click",()=>{
+    download(new Blob([currentSVG],{type:"image/svg+xml"}), `trace-${state.subject}-${state.seed}.svg`);
+  });
+  $("#pngBtn").addEventListener("click",()=>{
+    const OUTW=2400, OUTH=1800;
+    const blob=new Blob([currentSVG],{type:"image/svg+xml;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const img=new Image();
+    img.onload=()=>{
+      const c=document.createElement("canvas"); c.width=OUTW; c.height=OUTH;
+      const ctx=c.getContext("2d");
+      ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,OUTW,OUTH);
+      ctx.drawImage(img,0,0,OUTW,OUTH);
+      URL.revokeObjectURL(url);
+      c.toBlob(b=>{ if(b) download(b,`trace-${state.subject}-${state.seed}.png`); }, "image/png");
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); alert("ייצוא נכשל — נסו שוב או השתמשו בכפתור SVG."); };
+    img.src=url;
+  });
+
+  /* ---------- mode tabs ---------- */
+  function selectTab(which){
+    const fund=which==="fund";
+    $("#tab-fund").setAttribute("aria-selected",String(fund));
+    $("#tab-prod").setAttribute("aria-selected",String(!fund));
+    $("#mode-fund").classList.toggle("hidden",!fund);
+    $("#mode-prod").classList.toggle("hidden",fund);
+  }
+  $("#tab-fund").addEventListener("click",()=>selectTab("fund"));
+  $("#tab-prod").addEventListener("click",()=>selectTab("prod"));
+
+  /* ---------- theme toggle ---------- */
+  $("#themeBtn").addEventListener("click",()=>{
+    const cur=document.documentElement.getAttribute("data-theme");
+    const dark=window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = cur ? (cur==="dark"?"light":"dark") : (dark?"light":"dark");
+    document.documentElement.setAttribute("data-theme",next);
+  });
+
+  /* ---------- real-product prompt builder ---------- */
+  const prod={angle:"three-quarter front view, slight high angle", style:"line", detail:"moderate detail, main features visible"};
+  wireSegProd("#angleSeg","angle");
+  wireSegProd("#styleSeg","style");
+  wireSegProd("#detailSeg","detail");
+  function wireSegProd(id,key){
+    const el=$(id);
+    el.addEventListener("click",e=>{
+      const b=e.target.closest("button"); if(!b) return;
+      [...el.querySelectorAll("button")].forEach(x=>x.setAttribute("aria-pressed",x===b?"true":"false"));
+      prod[key]=b.dataset.val;
+    });
+  }
+  $("#buildPromptBtn").addEventListener("click",()=>{
+    const name=($("#prodName").value||"").trim() || "industrial product";
+    const mat=($("#prodMat").value||"").trim();
+    const styleMap={
+      line:"clean black and white line drawing, technical product illustration, even line weight, pure white background, no shading, no color",
+      studio:"professional studio product photograph, soft even lighting, seamless neutral background, sharp focus",
+      ortho:"orthographic technical drawing, engineering blueprint style, flat even lines, white background, no perspective distortion"
+    };
+    const matStr = mat? `, ${mat}` : "";
+    const primary = `${name}, ${prod.angle}, ${styleMap[prod.style]}, ${prod.detail}${matStr}, centered in frame, full object visible, industrial design reference sheet`;
+    const alt = `${name}, ${prod.angle}, clean minimal single-weight black outline on pure white, contour line art only, no interior shading, no gradients, no background, high clarity for tracing, product design sketch reference${matStr}`;
+    $("#promptPrimaryText").textContent=primary;
+    $("#promptAltText").textContent=alt;
+  });
+  document.querySelectorAll(".copybtn").forEach(b=>{
+    b.addEventListener("click",async()=>{
+      const t=$("#"+b.dataset.target).textContent;
+      try{ await navigator.clipboard.writeText(t); const o=b.textContent; b.textContent="הועתק ✓"; setTimeout(()=>b.textContent=o,1400);}catch(e){}
+    });
+  });
+
+  /* ---------- init ---------- */
+  render();
+})();
+</script>
+</body>
+</html>
