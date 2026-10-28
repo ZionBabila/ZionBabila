@@ -45,8 +45,9 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mu
 <div class="card">
   <div class="row" style="justify-content:space-between">
     <div><div class="big" id="clock">--:--:--</div><div class="mut" id="date"></div></div>
-    <div style="text-align:left"><span class="pill off" id="state">כבוי</span><div class="mut" id="outp"></div></div>
+    <div style="text-align:left"><span class="pill off" id="state">כבוי</span><div class="mut" id="outp"></div><div class="mut" id="temp"></div></div>
   </div>
+  <div class="warn" id="heatWarn" style="display:none;margin-top:10px"></div>
   <div class="warn" id="timeWarn" style="display:none;margin-top:10px">השעון לא מכוון – במצב אוטומטי הנורה תישאר כבויה.
     <button class="pri" onclick="syncTime()" style="margin-top:8px">כוון שעה מהטלפון</button></div>
 </div>
@@ -79,6 +80,10 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mu
   <div class="row">
     <label class="f">תדר PWM (Hz)<input type="number" id="freq" min="100" max="40000"></label>
     <label class="f">עוצמה מקסימלית %<input type="number" id="maxLevel" min="0" max="100"></label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label class="f">חיישני חום (NTC)<select id="sensors"><option value="0">ללא</option><option value="1">1 (GPIO3)</option><option value="2">2 (GPIO3+GPIO1)</option></select></label>
+    <label class="f">טמפ' מקסימלית בצלע (°C)<input type="number" id="tlimit" min="30" max="90"></label>
   </div>
   <div class="row" style="margin-top:8px">
     <label class="f">היפוך PWM<select id="invert"><option value="0">רגיל</option><option value="1">הפוך</option></select></label>
@@ -143,7 +148,7 @@ async function saveSlots(){
 async function setMode(m){try{await post('/api/mode',{mode:m,level:$('mlevel').value});refresh()}catch(e){toast('שגיאה')}}
 async function syncTime(){try{await post('/api/time',{epoch:Math.floor(Date.now()/1000)});toast('השעה כוונה ✔');refresh()}catch(e){toast('שגיאה')}}
 async function saveSettings(){
-  try{await post('/api/settings',{freq:$('freq').value,invert:$('invert').value,maxLevel:$('maxLevel').value,tz:$('tz').value});toast('נשמר ✔')}catch(e){toast('שגיאה')}
+  try{await post('/api/settings',{freq:$('freq').value,invert:$('invert').value,maxLevel:$('maxLevel').value,sensors:$('sensors').value,tlimit:$('tlimit').value,tz:$('tz').value});toast('נשמר ✔')}catch(e){toast('שגיאה')}
 }
 async function saveWifi(){
   if(!confirm('הבקר יופעל מחדש ויתחבר לרשת. להמשיך?'))return;
@@ -159,13 +164,18 @@ async function refresh(){
   $('timeWarn').style.display=S.timeValid?'none':'block';
   const on=S.output>0;$('state').textContent=on?'דולק':'כבוי';$('state').className='pill '+(on?'on':'off');
   $('outp').textContent='יציאה: '+S.output+'%';
+  $('temp').textContent=S.sensors?('🌡 '+S.temps.map(t=>t===null?'--':t.toFixed(1)+'°C').join(' / ')):'';
+  const hw=$('heatWarn');
+  if(S.sensors&&S.fault){hw.style.display='block';hw.textContent='חיישן חום לא מחובר או תקול – העוצמה מוגבלת ל-'+S.tcap+'%'}
+  else if(S.sensors&&S.tcap<100){hw.style.display='block';hw.textContent='הגנת חום פעילה – העוצמה מוגבלת ל-'+S.tcap+'%'}
+  else hw.style.display='none';
   for(let i=0;i<3;i++)$('m'+i).classList.toggle('sel',S.mode==i);
   $('manualBox').style.display=S.mode==1?'block':'none';
   $('net').textContent=S.ap?('מצב נקודת גישה (UV-Timer) · '+S.ip):('מחובר ל-'+S.ssid+' · '+S.ip+' · '+S.rssi+'dBm');
   if(!loaded){
     loaded=true;slots=S.slots;renderSlots();
     $('mlevel').value=S.manualLevel;$('mlv').textContent=S.manualLevel+'%';
-    $('freq').value=S.freq;$('invert').value=S.invert?1:0;$('maxLevel').value=S.maxLevel;$('tz').value=S.tz;$('ssid').value=S.ssid;
+    $('freq').value=S.freq;$('invert').value=S.invert?1:0;$('maxLevel').value=S.maxLevel;$('sensors').value=S.sensors;$('tlimit').value=S.tlimit;$('tz').value=S.tz;$('ssid').value=S.ssid;
     if(!S.timeValid)syncTime(); // auto-set clock from the phone when there is no internet time
   }
 }

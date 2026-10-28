@@ -23,6 +23,15 @@ const int PWM_PIN = 4;
 const int STATUS_LED_PIN = 8;      // on-board blue LED, active LOW
 const int PWM_BITS = 10;           // duty 0..1023
 
+// ---------- Temperature (NTC thermistor, like 3D printers) ----------
+// Wiring per sensor: 3.3V -- 100k resistor -- GPIO -- NTC -- GND
+// (optional 100nF capacitor from GPIO to GND for a steadier reading)
+const int NTC_PINS[2] = {3, 1};    // ADC pins. Sensor 1 = GPIO3, sensor 2 = GPIO1
+const float NTC_R25 = 100000.0f;   // NTC resistance at 25C (100K)
+const float NTC_BETA = 3950.0f;    // B value (3950 is the common one)
+const float NTC_RFIXED = 100000.0f;// fixed resistor to 3.3V (same value as NTC)
+const uint8_t FAULT_CAP = 30;      // max % while a sensor is broken/disconnected
+
 // ---------- Network ----------
 const char *AP_SSID = "UV-Timer";
 const char *AP_PASS = "uvtimer123"; // min 8 chars. Change it.
@@ -49,6 +58,8 @@ uint8_t manualLevel = 100;
 uint32_t pwmFreq = 1000;
 bool pwmInvert = false;
 uint8_t maxLevel = 100;           // global limit, protects the LED
+uint8_t sensorCount = 0;          // 0 = no thermal protection, 1 or 2 sensors
+uint8_t tempLimit = 50;           // C, measured on the heatsink
 String tzString = DEFAULT_TZ;
 String wifiSsid, wifiPass;
 
@@ -58,6 +69,9 @@ WebServer server(80);
 bool apMode = false;
 float currentDuty = 0;            // 0..100, ramps toward target
 uint8_t targetLevel = 0;
+float temps[2] = {NAN, NAN};      // NAN = not connected / fault
+float thermalCap = 100;           // % limit set by the thermal controller
+bool sensorFault = false;
 
 // ---------- Storage ----------
 void loadSettings() {
@@ -69,12 +83,16 @@ void loadSettings() {
   pwmFreq = prefs.getUInt("freq", 1000);
   pwmInvert = prefs.getBool("invert", false);
   maxLevel = prefs.getUChar("maxlvl", 100);
+  sensorCount = prefs.getUChar("sensors", 0);
+  tempLimit = prefs.getUChar("tlimit", 50);
   tzString = prefs.getString("tz", DEFAULT_TZ);
   wifiSsid = prefs.getString("ssid", "");
   wifiPass = prefs.getString("pass", "");
   prefs.end();
   if (mode > MODE_OFF) mode = MODE_AUTO;
   if (pwmFreq < 100 || pwmFreq > 40000) pwmFreq = 1000;
+  if (sensorCount > 2) sensorCount = 0;
+  if (tempLimit < 30 || tempLimit > 90) tempLimit = 50;
 }
 
 void saveSlots() {
@@ -119,6 +137,48 @@ void pwmWritePercent(float pct) {
 #endif
 }
 
+// ---------- Temperature ----------
+float readNtc(int pin) {
+  uint32_t mv = 0;
+  for (int i = 0; i < 16; i++) mv += analogReadMilliVolts(pin);
+  mv /= 16;
+  // open circuit -> pulled up to ~3.3V, short -> ~0V
+  if (mv < 40 || mv > 2700) return NAN;
+  float r = NTC_RFIXED * mv / (3300.0f - mv);
+  float k = 1.0f / (1.0f / 298.15f + logf(r / NTC_R25) / NTC_BETA);
+  return k - 273.15f;
+}
+
+uint8_t thermalLimit() {
+  if (sensorCount == 0) return 100;
+  uint8_t cap = (uint8_t)thermalCap;
+  return sensorFault ? min(cap, FAULT_CAP) : cap;
+}
+
+// called every second
+void updateThermal() {
+  static uint8_t tick = 0;
+  if (sensorCount == 0) {
+    temps[0] = temps[1] = NAN;
+    sensorFault = false;
+    thermalCap = 100;
+    return;
+  }
+  float maxT = NAN;
+  sensorFault = false;
+  for (int i = 0; i < 2; i++) {
+    temps[i] = (i < sensorCount) ? readNtc(NTC_PINS[i]) : NAN;
+    if (i < sensorCount && isnan(temps[i])) sensorFault = true;
+    if (!isnan(temps[i]) && (isnan(maxT) || temps[i] > maxT)) maxT = temps[i];
+  }
+  if (isnan(maxT)) return;
+  if (maxT > tempLimit + 15) { thermalCap = 0; return; } // emergency
+  if (++tick < 5) return;                                 // adjust every 5 s
+  tick = 0;
+  if (maxT > tempLimit) thermalCap = max(0.0f, thermalCap - 5);
+  else if (maxT < tempLimit - 2) thermalCap = min(100.0f, thermalCap + 2);
+}
+
 // ---------- Time ----------
 bool timeValid() {
   return time(nullptr) > 1700000000; // after Nov 2023 = clock was set
@@ -148,7 +208,7 @@ uint8_t computeTarget() {
         lvl = slots[i].level;
   }
   // no valid time in AUTO mode -> stay OFF (safe)
-  return min(lvl, maxLevel);
+  return min(min(lvl, maxLevel), thermalLimit());
 }
 
 // ---------- Helpers ----------
@@ -184,6 +244,16 @@ void handleState() {
   j += "\"freq\":" + String(pwmFreq) + ",";
   j += "\"invert\":" + String(pwmInvert ? "true" : "false") + ",";
   j += "\"maxLevel\":" + String(maxLevel) + ",";
+  j += "\"sensors\":" + String(sensorCount) + ",";
+  j += "\"tlimit\":" + String(tempLimit) + ",";
+  j += "\"tcap\":" + String(thermalLimit()) + ",";
+  j += "\"fault\":" + String(sensorFault ? "true" : "false") + ",";
+  j += "\"temps\":[";
+  for (int i = 0; i < sensorCount; i++) {
+    if (i) j += ",";
+    j += isnan(temps[i]) ? String("null") : String(temps[i], 1);
+  }
+  j += "],";
   j += "\"tz\":\"" + jsonEscape(tzString) + "\",";
   j += "\"ssid\":\"" + jsonEscape(wifiSsid) + "\",";
   j += "\"ap\":" + String(apMode ? "true" : "false") + ",";
@@ -266,6 +336,14 @@ void handleSettings() {
     maxLevel = constrain(server.arg("maxLevel").toInt(), 0, 100);
     prefs.putUChar("maxlvl", maxLevel);
   }
+  if (server.hasArg("sensors")) {
+    sensorCount = constrain(server.arg("sensors").toInt(), 0, 2);
+    prefs.putUChar("sensors", sensorCount);
+  }
+  if (server.hasArg("tlimit")) {
+    tempLimit = constrain(server.arg("tlimit").toInt(), 30, 90);
+    prefs.putUChar("tlimit", tempLimit);
+  }
   if (server.hasArg("tz") && server.arg("tz").length() > 2) {
     tzString = server.arg("tz");
     prefs.putString("tz", tzString);
@@ -332,6 +410,7 @@ void setup() {
   loadSettings();
   pwmBegin();
   pwmWritePercent(0);
+  analogReadResolution(12);
 
   startWifi();
 
@@ -354,6 +433,7 @@ void loop() {
 
   if (ms - lastCheck >= 1000) {
     lastCheck = ms;
+    updateThermal();
     targetLevel = computeTarget();
     digitalWrite(STATUS_LED_PIN, targetLevel ? LOW : HIGH); // blue LED mirrors UV state
   }
