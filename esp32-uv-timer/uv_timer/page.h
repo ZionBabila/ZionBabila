@@ -74,12 +74,23 @@ details[open] summary .chev{transform:rotate(180deg)}
 .panel{background:var(--card);width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
 .panel h3{margin:0 0 4px;font-size:20px}
 .actions{display:flex;gap:10px;margin-top:20px}
+.uvw{display:flex;gap:12px;align-items:flex-start;background:#3a2a05;border:1px solid #b8860b;color:#ffe08a;border-radius:var(--r);padding:14px;margin-bottom:14px;font-size:14px}
+.uvw .ico{flex:none;width:34px;height:34px;border-radius:8px;background:#ffcc00;color:#000;display:grid;place-items:center;font-size:20px;font-weight:800}
+.uvw b{color:#fff3c4}
+.uvon{margin-top:12px;border-radius:12px;padding:10px 12px;font-size:13px;font-weight:600;background:#4a1d6e;color:#e9d5ff}
 #toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:10}
 #toast.show{opacity:1}
 </style>
 </head>
 <body>
 <main>
+
+<!-- UV safety -->
+<section class="uvw" role="alert">
+  <div class="ico">⚠</div>
+  <div><b>UV radiation warning – UV‑A LEDs, 365–370 nm.</b><br>
+  Never look directly at the LEDs. Wear UV‑blocking safety glasses and protect exposed skin while they are on. Keep away from children and pets.</div>
+</section>
 
 <!-- Clock -->
 <section class="card">
@@ -111,6 +122,7 @@ details[open] summary .chev{transform:rotate(180deg)}
     <label class="f">Brightness <b id="manV" style="color:var(--fg)"></b></label>
     <input type="range" id="manL" min="1" max="100" oninput="manV.textContent=this.value+'%'" onchange="setMode(1)">
   </div>
+  <div class="uvon" id="uvOn" hidden>⚠ UV is ON – wear eye protection, do not look at the LEDs.</div>
   <div class="banner bad" id="heatWarn" hidden></div>
 </section>
 
@@ -262,7 +274,7 @@ function nextStart(now){
 }
 function renderStatus(){
   const out=Math.round(S.output),on=S.output>0.05;
-  $('bulb').className='bulb'+(on?' on':'');
+  $('bulb').className='bulb'+(on?' on':'');$('uvOn').hidden=!on;
   $('stTxt').textContent=on?`On · ${out<1?'<1':out}%`:'Off';
   let sub='';
   if(S.mode==1)sub='Always on (manual)';
