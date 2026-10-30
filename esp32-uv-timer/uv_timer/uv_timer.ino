@@ -55,8 +55,15 @@ struct Event {
   uint16_t duration; // minutes 1..1440 (may run past midnight)
   uint8_t fadeIn;    // 0 = instant on, 1 = fade in
   uint8_t fadeOut;   // 0 = instant off, 1 = fade out
-  uint8_t fadeMin;   // fade length in minutes 1..60
+  uint16_t fadeSec;  // fade length in seconds 1..3600
   uint8_t enabled;
+};
+
+// Older firmware stored the fade in minutes; used once to convert saved events.
+struct EventV1 {
+  uint8_t days, level;
+  uint16_t start, duration;
+  uint8_t fadeIn, fadeOut, fadeMin, enabled;
 };
 
 enum Mode : uint8_t { MODE_AUTO = 0, MODE_ON = 1, MODE_OFF = 2 };
@@ -83,9 +90,25 @@ float thermalCap = 100;
 bool sensorFault = false;
 
 // ================= Storage =================
+void saveEvents() {
+  prefs.begin("uvtimer2", false);
+  prefs.putBytes("events2", events, eventCount * sizeof(Event));
+  prefs.end();
+}
+
 void loadSettings() {
   prefs.begin("uvtimer2", true);
-  eventCount = prefs.getBytes("events", events, sizeof(events)) / sizeof(Event);
+  eventCount = prefs.getBytes("events2", events, sizeof(events)) / sizeof(Event);
+  bool migrate = !prefs.isKey("events2") && prefs.isKey("events");
+  if (migrate) {                                 // convert minutes -> seconds
+    EventV1 old[MAX_EVENTS];
+    int n = prefs.getBytes("events", old, sizeof(old)) / sizeof(EventV1);
+    for (int i = 0; i < n && i < MAX_EVENTS; i++) {
+      events[i] = {old[i].days, old[i].level, old[i].start, old[i].duration,
+                   old[i].fadeIn, old[i].fadeOut, (uint16_t)(old[i].fadeMin * 60), old[i].enabled};
+    }
+    eventCount = min(n, MAX_EVENTS);
+  }
   mode = (Mode)prefs.getUChar("mode", MODE_AUTO);
   manualLevel = prefs.getUChar("mlevel", 100);
   maxLevel = prefs.getUChar("maxlvl", 100);
@@ -97,6 +120,7 @@ void loadSettings() {
   apPass = prefs.getString("pass", DEFAULT_PASS);
   prefs.end();
   if (eventCount > MAX_EVENTS) eventCount = 0;
+  if (migrate) saveEvents();
   if (mode > MODE_OFF) mode = MODE_AUTO;
   if (pwmFreq < 100 || pwmFreq > PWM_FREQ_MAX) pwmFreq = 1000;
   if (sensorCount > 2) sensorCount = 0;
@@ -238,16 +262,17 @@ void updateThermal() {                           // every second
 
 // ================= Schedule =================
 // Brightness of one event at this moment (0 if not running).
-float eventLevel(const Event &e, int wday, long secOfDay) {
+// secOfDay includes fractions of a second so short fades are smooth.
+float eventLevel(const Event &e, int wday, double secOfDay) {
   if (!e.enabled || !e.duration) return 0;
   float best = 0;
   long dur = e.duration * 60L;
   for (int back = 0; back < 2; back++) {         // started today or yesterday
     int d = (wday + 7 - back) % 7;
     if (!(e.days & (1 << d))) continue;
-    long el = secOfDay + back * 86400L - e.start * 60L;
+    float el = (float)(secOfDay + back * 86400.0 - e.start * 60.0);
     if (el < 0 || el >= dur) continue;
-    float fade = e.fadeMin * 60.0f;
+    float fade = e.fadeSec;
     int fades = (e.fadeIn ? 1 : 0) + (e.fadeOut ? 1 : 0);
     if (fades && fade * fades > dur) fade = (float)dur / fades;
     float env = 1;
@@ -260,10 +285,12 @@ float eventLevel(const Event &e, int wday, long secOfDay) {
 
 float scheduleLevel() {
   if (!timeSet()) return 0;                      // unknown time -> stay off
-  time_t now = time(nullptr);
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  time_t now = tv.tv_sec;
   struct tm t;
   gmtime_r(&now, &t);
-  long sec = t.tm_hour * 3600L + t.tm_min * 60L + t.tm_sec;
+  double sec = t.tm_hour * 3600.0 + t.tm_min * 60.0 + t.tm_sec + tv.tv_usec / 1e6;
   float lvl = 0;
   for (int i = 0; i < eventCount; i++) lvl = max(lvl, eventLevel(events[i], t.tm_wday, sec));
   return lvl;
@@ -319,14 +346,14 @@ void handleState() {
     if (i) j += ",";
     j += "{\"d\":" + String(e.days) + ",\"s\":" + String(e.start) + ",\"u\":" + String(e.duration) +
          ",\"l\":" + String(e.level) + ",\"fi\":" + String(e.fadeIn) + ",\"fo\":" + String(e.fadeOut) +
-         ",\"f\":" + String(e.fadeMin) + ",\"on\":" + String(e.enabled) + "}";
+         ",\"f\":" + String(e.fadeSec) + ",\"on\":" + String(e.enabled) + "}";
   }
   j += "]}";
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", j);
 }
 
-// body "e" = "days,start,duration,level,fadeIn,fadeOut,fadeMin,enabled;..."
+// body "e" = "days,start,duration,level,fadeIn,fadeOut,fadeSec,enabled;..."
 void handleEvents() {
   String s = server.arg("e");
   Event tmp[MAX_EVENTS];
@@ -352,14 +379,12 @@ void handleEvents() {
     e.level = constrain(v[3], 1, 100);
     e.fadeIn = v[4] ? 1 : 0;
     e.fadeOut = v[5] ? 1 : 0;
-    e.fadeMin = constrain(v[6], 1, 60);
+    e.fadeSec = constrain(v[6], 1, 3600);
     e.enabled = v[7] ? 1 : 0;
   }
   memcpy(events, tmp, sizeof(Event) * n);
   eventCount = n;
-  prefs.begin("uvtimer2", false);
-  prefs.putBytes("events", events, eventCount * sizeof(Event));
-  prefs.end();
+  saveEvents();
   server.send(200, "text/plain", "OK");
 }
 

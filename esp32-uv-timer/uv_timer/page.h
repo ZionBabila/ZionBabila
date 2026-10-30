@@ -181,8 +181,8 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div><label class="f">Turn off</label><div class="seg" id="evFo"><button data-v="0">Instant</button><button data-v="1">Fade out</button></div></div>
     </div>
     <div id="fadeBox">
-      <label class="f">Fade length (minutes)</label>
-      <input type="number" id="evF" min="1" max="60" inputmode="numeric" oninput="evHint()">
+       <label class="f">Fade length (seconds)</label>
+      <input type="number" id="evF" min="1" max="3600" inputmode="numeric" oninput="evHint()">
     </div>
     <div class="actions">
       <button class="danger" id="evDel" onclick="delEv()">Delete</button>
@@ -220,6 +220,7 @@ async function post(u,d){const r=await fetch(u,{method:'POST',body:new URLSearch
 const nowSec=()=>base+Math.floor((Date.now()-baseAt)/1000);
 const phoneLocal=()=>Math.floor(Date.now()/1000)-new Date().getTimezoneOffset()*60;
 function dur(m){const h=Math.floor(m/60),r=m%60;return h&&r?`${h}h ${r}m`:h?`${h}h`:`${r}m`}
+function fadeTxt(s){return s<60?`${s} s`:s%60?`${Math.floor(s/60)}m ${s%60}s`:`${s/60} min`}
 function daysTxt(d){if(d==127)return'Every day';if(d==62)return'Mon–Fri';if(d==31)return'Sun–Thu';if(!d)return'No days';return DS.filter((_,i)=>d>>i&1).join(', ')}
 function inTxt(s){const m=Math.round(s/60);return m<60?`${m} min`:m<1440?`${Math.floor(m/60)}h ${m%60}m`:`${Math.floor(m/1440)}d ${Math.floor(m%1440/60)}h`}
 
@@ -299,7 +300,7 @@ function renderEvents(){
       <div class="lvl" style="opacity:${.25+e.l/133}"></div>
       <div class="grow"><div class="t">${hm(e.s)} – ${hm(end)}${end>=1440?' <span class="mut">+1</span>':''}</div>
       <div class="mut">${daysTxt(e.d)} · ${e.l}% · ${dur(e.u)}</div>
-      <div class="mut">${e.fi?'Fade in':'Instant on'} → ${e.fo?'fade out':'instant off'}${e.fi||e.fo?` (${e.f} min)`:''}</div></div>
+      <div class="mut">${e.fi?'Fade in':'Instant on'} → ${e.fo?'fade out':'instant off'}${e.fi||e.fo?` (${fadeTxt(e.f)})`:''}</div></div>
       <label class="sw" onclick="event.stopPropagation()"><input type="checkbox" ${e.on?'checked':''} onchange="toggleEv(${i},this.checked)"><span></span></label>
     </div>`}).join('');
 }
@@ -331,7 +332,7 @@ function renderDays(){$('evDays').innerHTML=DS.map((n,i)=>`<button class="${D.d>
 function setDays(v){D.d=v;renderDays()}
 function openEv(i){
   if(EV.length>=20&&i<0){toast('Maximum 20 events');return}
-  edit=i;D=i<0?{d:127,s:18*60,u:120,l:100,fi:1,fo:1,f:5,on:1}:{...EV[i]};
+  edit=i;D=i<0?{d:127,s:18*60,u:120,l:100,fi:1,fo:1,f:10,on:1}:{...EV[i]};
   $('evTitle').textContent=i<0?'New event':'Edit event';$('evDel').hidden=i<0;
   renderDays();$('evStart').value=hm(D.s);$('evH').value=Math.floor(D.u/60);$('evM').value=D.u%60;
   $('evL').value=D.l;$('evLV').textContent=D.l+'%';$('evF').value=D.f;segSet('evFi',D.fi);segSet('evFo',D.fo);
@@ -344,7 +345,7 @@ function evHint(){
   $('fadeBox').hidden=!(D.fi||D.fo);
   let t=u>0?`Ends at ${hm(s+u)}${s+u>=1440?' (next day)':''} · ${dur(u)}`:'Set a duration';
   const f=+$('evF').value||0,n=(D.fi?1:0)+(D.fo?1:0);
-  if(n&&u>0&&f*n>u)t+=' · fades will be shortened to fit';
+  if(n&&u>0&&f*n>u*60)t+=' · fades will be shortened to fit';
   $('evEnd').textContent=t;
 }
 async function saveEv(){
@@ -352,7 +353,7 @@ async function saveEv(){
   if(!D.d){toast('Pick at least one day');return}
   if(!st){toast('Pick a start time');return}
   if(u<1||u>1440){toast('Duration must be 1 min – 24 h');return}
-  if((D.fi||D.fo)&&(f<1||f>60)){toast('Fade length: 1–60 minutes');return}
+  if((D.fi||D.fo)&&(f<1||f>3600)){toast('Fade length: 1–3600 seconds');return}
   const [h,m]=st.split(':').map(Number);
   Object.assign(D,{s:h*60+m,u,l:+$('evL').value,f:f||D.f});
   if(edit<0)EV.push(D);else EV[edit]=D;
