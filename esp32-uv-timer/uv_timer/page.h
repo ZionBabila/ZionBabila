@@ -2,185 +2,394 @@
 #include <pgmspace.h>
 
 const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>שעון UV</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14122b">
+<title>UV Timer</title>
 <style>
-:root{--bg:#0f1020;--card:#1a1b33;--fg:#e8e8f4;--mut:#9a9ab8;--acc:#9b5cff;--on:#3ddc97;--off:#ff5c7a;--line:#2c2d4d}
-*{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--fg)}
-main{max-width:680px;margin:auto;padding:16px}
-h1{font-size:22px;margin:4px 0 12px}
-h2{font-size:17px;margin:0 0 10px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.big{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
-.mut{color:var(--mut);font-size:13px}
-.pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:13px;font-weight:600}
-.pill.on{background:#1f4d3c;color:var(--on)}.pill.off{background:#4d1f2b;color:var(--off)}
-button{background:var(--line);color:var(--fg);border:0;border-radius:10px;padding:10px 14px;font-size:15px;cursor:pointer}
-button.pri{background:var(--acc);color:#fff}
-button.sel{outline:2px solid var(--acc);background:#2f2257}
-button.del{background:transparent;color:var(--off);padding:6px 8px}
-.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
-input,select{background:#11122a;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:15px}
-input[type=range]{width:100%;padding:0}
-input[type=time]{min-width:110px}
-.slot{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px}
-.days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:8px 0}
-.days label{text-align:center;border:1px solid var(--line);border-radius:8px;padding:6px 0;font-size:14px;cursor:pointer;user-select:none}
-.days input{display:none}
-.days label.ck{background:var(--acc);border-color:var(--acc);color:#fff}
-label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mut);flex:1;min-width:120px}
-.warn{background:#3a2a10;border:1px solid #7a5a1a;color:#ffd38a;border-radius:10px;padding:10px;font-size:14px}
-#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--acc);color:#fff;padding:10px 18px;border-radius:10px;display:none}
+:root{--bg:#0e0d1f;--card:#1a1833;--card2:#221f40;--fg:#efeefb;--mut:#9c99c2;--line:#2f2b55;--acc:#9d5cff;--acc2:#c39bff;--on:#3ddc97;--off:#6b678f;--warn:#ffb547;--bad:#ff5c7a;--r:16px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:560px;margin:auto;padding:16px 16px 40px}
+h2{font-size:15px;font-weight:650;margin:0;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.row{display:flex;gap:10px;align-items:center}
+.sp{justify-content:space-between}
+.mut{color:var(--mut);font-size:14px}
+.clock{font-size:46px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.badge{font-size:12px;font-weight:650;padding:4px 10px;border-radius:99px;background:var(--card2);color:var(--mut);white-space:nowrap}
+.badge.ok{color:var(--on);background:#163b30}.badge.warn{color:var(--warn);background:#3d2e12}
+button{font:inherit;border:0;border-radius:12px;padding:12px 14px;background:var(--card2);color:var(--fg);cursor:pointer;font-weight:600}
+button:active{transform:scale(.98)}
+.pri{background:var(--acc);color:#fff}
+.ghost{background:transparent;color:var(--acc2);padding:8px 4px}
+.danger{background:transparent;color:var(--bad)}
+.grow{flex:1}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--bg);border-radius:12px;padding:4px;gap:4px}
+.seg button{background:transparent;color:var(--mut);padding:10px 6px}
+.seg button.sel{background:var(--acc);color:#fff}
+.status{display:flex;align-items:center;gap:14px}
+.bulb{width:52px;height:52px;border-radius:50%;background:var(--card2);display:grid;place-items:center;font-size:22px;flex:none;transition:.3s}
+.bulb.on{background:radial-gradient(circle,#c39bff 0,#7b2cff 70%);box-shadow:0 0 28px #9d5cffaa}
+.big{font-size:22px;font-weight:700}
+input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%}
+input:focus,select:focus{outline:2px solid var(--acc);border-color:transparent}
+input[type=range]{padding:0;border:0;background:none;accent-color:var(--acc);height:28px}
+label.f{display:block;font-size:13px;color:var(--mut);margin:14px 0 6px}
+.ev{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line);cursor:pointer}
+.ev:first-of-type{border-top:0}
+.ev .t{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+.ev.dis{opacity:.45}
+.lvl{width:6px;align-self:stretch;border-radius:3px;background:var(--acc);flex:none}
+.sw{position:relative;width:48px;height:28px;flex:none}
+.sw input{opacity:0;width:0;height:0}
+.sw span{position:absolute;inset:0;background:var(--off);border-radius:99px;transition:.2s}
+.sw span:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.sw input:checked+span{background:var(--acc)}
+.sw input:checked+span:before{transform:translateX(20px)}
+.empty{text-align:center;padding:18px 0;color:var(--mut)}
+.week{display:grid;grid-template-columns:34px 1fr;gap:6px 8px;align-items:center;font-size:12px;color:var(--mut)}
+.bar{position:relative;height:16px;background:var(--bg);border-radius:5px;overflow:hidden}
+.bar i{position:absolute;top:0;bottom:0;background:var(--acc);border-radius:3px}
+.bar b{position:absolute;top:-2px;bottom:-2px;width:2px;background:#fff}
+.today{color:var(--fg);font-weight:700}
+.ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);grid-column:2}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.days button{padding:11px 0;background:var(--bg);color:var(--mut);border:1px solid var(--line)}
+.days button.sel{background:var(--acc);color:#fff;border-color:var(--acc)}
+.chips{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.chips button{padding:6px 12px;font-size:13px;border-radius:99px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hint{font-size:13px;color:var(--mut);margin-top:6px}
+.banner{border-radius:12px;padding:12px 14px;margin-top:12px;font-size:14px;background:#3d2e12;color:#ffd38a}
+.banner.bad{background:#46182a;color:#ffb3c1}
+details summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+details summary::-webkit-details-marker{display:none}
+details[open] summary .chev{transform:rotate(180deg)}
+.chev{transition:.2s;color:var(--mut)}
+.sheet{position:fixed;inset:0;background:#000a;display:none;align-items:flex-end;justify-content:center;z-index:9}
+.sheet.open{display:flex}
+.panel{background:var(--card);width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.panel h3{margin:0 0 4px;font-size:20px}
+.actions{display:flex;gap:10px;margin-top:20px}
+#toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:10}
+#toast.show{opacity:1}
 </style>
 </head>
 <body>
 <main>
-<h1>🟣 שעון נורת UV</h1>
 
-<div class="card">
-  <div class="row" style="justify-content:space-between">
-    <div><div class="big" id="clock">--:--:--</div><div class="mut" id="date"></div></div>
-    <div style="text-align:left"><span class="pill off" id="state">כבוי</span><div class="mut" id="outp"></div><div class="mut" id="temp"></div></div>
+<!-- Clock -->
+<section class="card">
+  <div class="row sp"><h2>Device clock</h2><span class="badge" id="clkBadge">—</span></div>
+  <div class="clock" id="clock">--:--:--</div>
+  <div class="mut" id="date">Clock not set</div>
+  <div class="row" style="margin-top:14px">
+    <button class="pri grow" onclick="syncPhone()">Sync with phone</button>
+    <button class="grow" onclick="openTime()">Set manually</button>
   </div>
-  <div class="warn" id="heatWarn" style="display:none;margin-top:10px"></div>
-  <div class="warn" id="timeWarn" style="display:none;margin-top:10px">השעון לא מכוון – במצב אוטומטי הנורה תישאר כבויה.
-    <button class="pri" onclick="syncTime()" style="margin-top:8px">כוון שעה מהטלפון</button></div>
-</div>
+  <div class="banner" id="clkWarn" hidden>The clock is not set, so events won't run. Tap <b>Sync with phone</b>.</div>
+</section>
 
-<div class="card">
-  <h2>מצב פעולה</h2>
-  <div class="seg">
-    <button id="m0" onclick="setMode(0)">אוטומטי</button>
-    <button id="m1" onclick="setMode(1)">דלוק ידני</button>
-    <button id="m2" onclick="setMode(2)">כבוי</button>
+<!-- Status / mode -->
+<section class="card">
+  <div class="status">
+    <div class="bulb" id="bulb">💡</div>
+    <div class="grow">
+      <div class="big" id="stTxt">Off</div>
+      <div class="mut" id="stSub">&nbsp;</div>
+    </div>
   </div>
-  <div id="manualBox" style="margin-top:12px;display:none">
-    <div class="row" style="justify-content:space-between"><span>עוצמה ידנית</span><b id="mlv">100%</b></div>
-    <input type="range" min="0" max="100" id="mlevel" oninput="mlv.textContent=this.value+'%'" onchange="setMode(1)">
+  <div class="seg" style="margin-top:14px">
+    <button id="m0" onclick="setMode(0)">Schedule</button>
+    <button id="m1" onclick="setMode(1)">Always on</button>
+    <button id="m2" onclick="setMode(2)">Off</button>
   </div>
-</div>
+  <div id="manBox" hidden>
+    <label class="f">Brightness <b id="manV" style="color:var(--fg)"></b></label>
+    <input type="range" id="manL" min="1" max="100" oninput="manV.textContent=this.value+'%'" onchange="setMode(1)">
+  </div>
+  <div class="banner bad" id="heatWarn" hidden></div>
+</section>
 
-<div class="card">
-  <h2>תוכנית שבועית</h2>
-  <div id="slots"></div>
-  <div class="row">
-    <button onclick="addSlot()">+ הוסף פרק זמן</button>
-    <button class="pri" onclick="saveSlots()">שמור תוכנית</button>
-  </div>
-  <p class="mut">פרק זמן שבו שעת הסיום מוקדמת משעת ההתחלה (למשל 22:00–06:00) ממשיך עד למחרת בבוקר. אם יש חפיפה – נבחרת העוצמה הגבוהה.</p>
-</div>
+<!-- Events -->
+<section class="card">
+  <div class="row sp" style="margin-bottom:6px"><h2>Events</h2><button class="ghost" onclick="openEv(-1)">+ Add event</button></div>
+  <div id="evList"></div>
+</section>
 
-<div class="card">
-  <h2>הגדרות</h2>
-  <div class="row">
-    <label class="f">תדר PWM (Hz)<input type="number" id="freq" min="100" max="40000"></label>
-    <label class="f">עוצמה מקסימלית %<input type="number" id="maxLevel" min="0" max="100"></label>
-  </div>
-  <div class="row" style="margin-top:8px">
-    <label class="f">חיישני חום (NTC)<select id="sensors"><option value="0">ללא</option><option value="1">1 (GPIO3)</option><option value="2">2 (GPIO3+GPIO1)</option></select></label>
-    <label class="f">טמפ' מקסימלית בצלע (°C)<input type="number" id="tlimit" min="30" max="90"></label>
-  </div>
-  <div class="row" style="margin-top:8px">
-    <label class="f">היפוך PWM<select id="invert"><option value="0">רגיל</option><option value="1">הפוך</option></select></label>
-    <label class="f">אזור זמן (POSIX)<input id="tz" dir="ltr"></label>
-  </div>
-  <div class="row" style="margin-top:10px">
-    <button class="pri" onclick="saveSettings()">שמור הגדרות</button>
-    <button onclick="syncTime()">כוון שעה מהטלפון</button>
-  </div>
-</div>
+<!-- Week -->
+<section class="card">
+  <h2 style="margin-bottom:12px">Week at a glance</h2>
+  <div class="week" id="week"></div>
+</section>
 
-<div class="card">
-  <h2>Wi‑Fi</h2>
-  <div class="mut" id="net"></div>
-  <div class="row" style="margin-top:8px">
-    <label class="f">שם רשת<input id="ssid" dir="ltr"></label>
-    <label class="f">סיסמה<input id="pass" type="password" dir="ltr"></label>
-  </div>
-  <div class="row" style="margin-top:10px"><button class="pri" onclick="saveWifi()">שמור והפעל מחדש</button></div>
-</div>
+<!-- Settings -->
+<section class="card">
+  <details>
+    <summary><h2>Settings</h2><span class="chev">▾</span></summary>
+    <label class="f">Max brightness limit <b id="maxV" style="color:var(--fg)"></b></label>
+    <input type="range" id="maxL" min="1" max="100" oninput="maxV.textContent=this.value+'%'">
+    <div class="hint">Caps every event and manual mode. Protects the LEDs.</div>
+    <div class="two">
+      <div><label class="f">Heat sensors</label>
+        <select id="sens"><option value="0">None</option><option value="1">1 sensor</option><option value="2">2 sensors</option></select></div>
+      <div><label class="f">Heatsink limit (°C)</label><input type="number" id="tlim" min="30" max="90" inputmode="numeric"></div>
+    </div>
+    <div class="two">
+      <div><label class="f">PWM frequency (Hz)</label><input type="number" id="freq" min="100" max="19000" inputmode="numeric"></div>
+      <div><label class="f">PWM signal</label>
+        <select id="inv"><option value="0">Normal</option><option value="1">Inverted</option></select></div>
+    </div>
+    <button class="pri" style="width:100%;margin-top:16px" onclick="saveSettings()">Save settings</button>
+
+    <div style="border-top:1px solid var(--line);margin:22px 0 4px"></div>
+    <h2 style="margin-top:14px">Wi‑Fi network</h2>
+    <label class="f">Network name</label><input id="ssid" maxlength="32" autocapitalize="off">
+    <label class="f">New password (8+ characters, empty = no password)</label><input id="pass" type="password" maxlength="63">
+    <button style="width:100%;margin-top:16px" onclick="saveWifi()">Save & restart</button>
+    <div class="hint" id="rtcInfo"></div>
+  </details>
+</section>
 </main>
+
+<!-- Event editor -->
+<div class="sheet" id="evSheet" onclick="if(event.target===this)closeEv()">
+  <div class="panel">
+    <h3 id="evTitle">New event</h3>
+    <label class="f">Days</label>
+    <div class="days" id="evDays"></div>
+    <div class="chips">
+      <button onclick="setDays(127)">Every day</button>
+      <button onclick="setDays(62)">Mon–Fri</button>
+      <button onclick="setDays(31)">Sun–Thu</button>
+      <button onclick="setDays(0)">Clear</button>
+    </div>
+    <div class="two">
+      <div><label class="f">Start time</label><input type="time" id="evStart" oninput="evHint()"></div>
+      <div><label class="f">Duration</label>
+        <div class="row" style="gap:6px"><input type="number" id="evH" min="0" max="24" inputmode="numeric" oninput="evHint()" aria-label="hours"><span class="mut">h</span>
+        <input type="number" id="evM" min="0" max="59" inputmode="numeric" oninput="evHint()" aria-label="minutes"><span class="mut">m</span></div></div>
+    </div>
+    <div class="hint" id="evEnd"></div>
+    <label class="f">Brightness <b id="evLV" style="color:var(--fg)"></b></label>
+    <input type="range" id="evL" min="1" max="100" oninput="evLV.textContent=this.value+'%'">
+    <div class="two">
+      <div><label class="f">Turn on</label><div class="seg" id="evFi"><button data-v="0">Instant</button><button data-v="1">Fade in</button></div></div>
+      <div><label class="f">Turn off</label><div class="seg" id="evFo"><button data-v="0">Instant</button><button data-v="1">Fade out</button></div></div>
+    </div>
+    <div id="fadeBox">
+      <label class="f">Fade length (minutes)</label>
+      <input type="number" id="evF" min="1" max="60" inputmode="numeric" oninput="evHint()">
+    </div>
+    <div class="actions">
+      <button class="danger" id="evDel" onclick="delEv()">Delete</button>
+      <span class="grow"></span>
+      <button onclick="closeEv()">Cancel</button>
+      <button class="pri" onclick="saveEv()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manual time -->
+<div class="sheet" id="tSheet" onclick="if(event.target===this)tSheet.classList.remove('open')">
+  <div class="panel">
+    <h3>Set date & time</h3>
+    <div class="two">
+      <div><label class="f">Date</label><input type="date" id="tDate"></div>
+      <div><label class="f">Time</label><input type="time" id="tTime" step="1"></div>
+    </div>
+    <div class="actions"><span class="grow"></span>
+      <button onclick="tSheet.classList.remove('open')">Cancel</button>
+      <button class="pri" onclick="saveTime()">Set clock</button></div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
-const DN=['א','ב','ג','ד','ה','ו','ש'];
-const DF=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
-let S={},slots=[],loaded=false,dirty=false;
-const $=id=>document.getElementById(id);
-const pad=n=>String(n).padStart(2,'0');
-const m2t=m=>pad(Math.floor(m/60))+':'+pad(m%60);
-const t2m=t=>{const[a,b]=t.split(':');return(+a)*60+(+b)};
-function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(()=>e.style.display='none',2000)}
-async function post(url,data){const r=await fetch(url,{method:'POST',body:new URLSearchParams(data)});if(!r.ok)throw 0;return r.text()}
+const DS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],DL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const $=id=>document.getElementById(id),p2=n=>String(n).padStart(2,'0');
+const hm=m=>p2(Math.floor(m/60)%24)+':'+p2(m%60);
+let S=null,EV=[],base=0,baseAt=0,edit=-1,D=null,loaded=false;
 
-function renderSlots(){
-  const box=$('slots');box.innerHTML='';
-  if(!slots.length)box.innerHTML='<p class="mut">אין פרקי זמן. הוסף אחד.</p>';
-  slots.forEach((s,i)=>{
-    const d=document.createElement('div');d.className='slot';
-    let days='';for(let k=0;k<7;k++){const c=s.d&(1<<k);
-      days+=`<label class="${c?'ck':''}" title="${DF[k]}"><input type="checkbox" ${c?'checked':''} onchange="tg(${i},${k},this)">${DN[k]}</label>`}
-    d.innerHTML=`<div class="row" style="justify-content:space-between">
-      <label class="row" style="gap:6px"><input type="checkbox" ${s.on?'checked':''} onchange="slots[${i}].on=this.checked?1:0;dirty=true"> פעיל</label>
-      <span class="row" style="gap:4px"><button onclick="allDays(${i})">כל הימים</button><button class="del" onclick="delSlot(${i})">🗑 מחק</button></span></div>
-      <div class="days">${days}</div>
-      <div class="row">
-        <label class="f">התחלה<input type="time" value="${m2t(s.s)}" onchange="slots[${i}].s=t2m(this.value);dirty=true"></label>
-        <label class="f">סיום<input type="time" value="${m2t(s.e)}" onchange="slots[${i}].e=t2m(this.value);dirty=true"></label>
-      </div>
-      <div class="row" style="justify-content:space-between;margin-top:8px"><span class="mut">עוצמה</span><b id="lv${i}">${s.l}%</b></div>
-      <input type="range" min="1" max="100" value="${s.l}" oninput="slots[${i}].l=+this.value;$('lv${i}').textContent=this.value+'%';dirty=true">`;
-    box.appendChild(d);
-  });
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2200)}
+async function post(u,d){const r=await fetch(u,{method:'POST',body:new URLSearchParams(d)});if(!r.ok)throw new Error(await r.text());return r}
+const nowSec=()=>base+Math.floor((Date.now()-baseAt)/1000);
+const phoneLocal=()=>Math.floor(Date.now()/1000)-new Date().getTimezoneOffset()*60;
+function dur(m){const h=Math.floor(m/60),r=m%60;return h&&r?`${h}h ${r}m`:h?`${h}h`:`${r}m`}
+function daysTxt(d){if(d==127)return'Every day';if(d==62)return'Mon–Fri';if(d==31)return'Sun–Thu';if(!d)return'No days';return DS.filter((_,i)=>d>>i&1).join(', ')}
+function inTxt(s){const m=Math.round(s/60);return m<60?`${m} min`:m<1440?`${Math.floor(m/60)}h ${m%60}m`:`${Math.floor(m/1440)}d ${Math.floor(m%1440/60)}h`}
+
+/* ---------- clock ---------- */
+function tick(){
+  if(!S)return;
+  if(!S.timeSet){$('clock').textContent='--:--:--';$('date').textContent='Clock not set';return}
+  const d=new Date(nowSec()*1000);
+  $('clock').textContent=p2(d.getUTCHours())+':'+p2(d.getUTCMinutes())+':'+p2(d.getUTCSeconds());
+  $('date').textContent=`${DL[d.getUTCDay()]}, ${d.getUTCDate()} ${MO[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
-function tg(i,k,el){slots[i].d^=(1<<k);el.parentNode.classList.toggle('ck',el.checked);dirty=true}
-function allDays(i){slots[i].d=127;dirty=true;renderSlots()}
-function addSlot(){slots.push({d:127,s:18*60,e:22*60,l:100,on:1});dirty=true;renderSlots()}
-function delSlot(i){slots.splice(i,1);dirty=true;renderSlots()}
-async function saveSlots(){
-  try{await post('/api/slots',{s:slots.map(s=>[s.d,s.s,s.e,s.l,s.on].join(',')).join(';')});dirty=false;toast('התוכנית נשמרה ✔')}catch(e){toast('שגיאה בשמירה')}
+async function setClock(t,msg){try{await post('/api/time',{t});toast(msg);await refresh()}catch(e){toast('Could not set clock')}}
+function syncPhone(){setClock(phoneLocal(),'Clock synced with phone ✓')}
+function openTime(){
+  const d=new Date((S&&S.timeSet?nowSec():phoneLocal())*1000);
+  $('tDate').value=`${d.getUTCFullYear()}-${p2(d.getUTCMonth()+1)}-${p2(d.getUTCDate())}`;
+  $('tTime').value=`${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`;
+  $('tSheet').classList.add('open');
 }
-async function setMode(m){try{await post('/api/mode',{mode:m,level:$('mlevel').value});refresh()}catch(e){toast('שגיאה')}}
-async function syncTime(){try{await post('/api/time',{epoch:Math.floor(Date.now()/1000)});toast('השעה כוונה ✔');refresh()}catch(e){toast('שגיאה')}}
+function saveTime(){
+  const [y,mo,da]=$('tDate').value.split('-').map(Number),[h,mi,se]=($('tTime').value+':0').split(':').map(Number);
+  if(!y||isNaN(h)){toast('Enter date and time');return}
+  $('tSheet').classList.remove('open');
+  setClock(Date.UTC(y,mo-1,da,h,mi,se||0)/1000,'Clock set ✓');
+}
+
+/* ---------- status ---------- */
+function activeEnd(now){
+  const wd=new Date(now*1000).getUTCDay(),sod=now%86400;let end=null;
+  EV.forEach(e=>{if(!e.on)return;for(let b=0;b<2;b++){if(!(e.d>>((wd+7-b)%7)&1))continue;
+    const el=sod+b*86400-e.s*60;if(el>=0&&el<e.u*60){const t=now-el+e.u*60;if(end===null||t>end)end=t}}});
+  return end;
+}
+function nextStart(now){
+  const wd=new Date(now*1000).getUTCDay(),day0=now-now%86400;let best=null;
+  EV.forEach(e=>{if(!e.on)return;for(let k=0;k<8;k++){if(!(e.d>>((wd+k)%7)&1))continue;
+    const t=day0+k*86400+e.s*60;if(t>now&&(best===null||t<best))best=t}});
+  return best;
+}
+function renderStatus(){
+  const out=Math.round(S.output),on=S.output>0.05;
+  $('bulb').className='bulb'+(on?' on':'');
+  $('stTxt').textContent=on?`On · ${out<1?'<1':out}%`:'Off';
+  let sub='';
+  if(S.mode==1)sub='Always on (manual)';
+  else if(S.mode==2)sub='Turned off (manual)';
+  else if(!S.timeSet)sub='Waiting for clock';
+  else{const now=nowSec(),end=activeEnd(now),nx=nextStart(now);
+    if(end)sub=`Until ${hm(Math.floor(end%86400/60))}`;
+    else if(nx){const d=new Date(nx*1000),k=Math.floor(nx/86400)-Math.floor(now/86400);
+      sub=`Next: ${k==0?'today':k==1?'tomorrow':DS[d.getUTCDay()]} ${hm(Math.floor(nx%86400/60))} · in ${inTxt(nx-now)}`}
+    else sub='No upcoming events'}
+  if(S.sensors)sub+=' · 🌡 '+S.temps.map(t=>t===null?'--':t.toFixed(0)+'°C').join(' / ');
+  $('stSub').textContent=sub;
+  for(let i=0;i<3;i++)$('m'+i).classList.toggle('sel',S.mode==i);
+  $('manBox').hidden=S.mode!=1;
+  const hw=$('heatWarn');
+  if(S.sensors&&S.fault){hw.hidden=false;hw.textContent=`Heat sensor not connected – brightness limited to ${S.tcap}%`}
+  else if(S.sensors&&S.tcap<100){hw.hidden=false;hw.textContent=`Heatsink above ${S.tlimit}°C – brightness limited to ${S.tcap}%`}
+  else hw.hidden=true;
+  $('clkWarn').hidden=S.timeSet;
+  const b=$('clkBadge');
+  if(!S.timeSet){b.textContent='Not set';b.className='badge warn'}
+  else{const diff=Math.abs(nowSec()-phoneLocal());
+    if(diff>120){b.textContent='Differs from phone';b.className='badge warn'}
+    else{b.textContent=S.rtc?'Set · battery backup':'Set';b.className='badge ok'}}
+}
+async function setMode(m){try{await post('/api/mode',{mode:m,level:$('manL').value});await refresh()}catch(e){toast('Error')}}
+
+/* ---------- events ---------- */
+function renderEvents(){
+  const box=$('evList');
+  if(!EV.length){box.innerHTML='<div class="empty">No events yet.<br>Tap <b>+ Add event</b> to create one.</div>';return}
+  const order=EV.map((e,i)=>i).sort((a,b)=>EV[a].s-EV[b].s);
+  box.innerHTML=order.map(i=>{const e=EV[i],end=e.s+e.u;
+    return `<div class="ev${e.on?'':' dis'}" onclick="openEv(${i})">
+      <div class="lvl" style="opacity:${.25+e.l/133}"></div>
+      <div class="grow"><div class="t">${hm(e.s)} – ${hm(end)}${end>=1440?' <span class="mut">+1</span>':''}</div>
+      <div class="mut">${daysTxt(e.d)} · ${e.l}% · ${dur(e.u)}</div>
+      <div class="mut">${e.fi?'Fade in':'Instant on'} → ${e.fo?'fade out':'instant off'}${e.fi||e.fo?` (${e.f} min)`:''}</div></div>
+      <label class="sw" onclick="event.stopPropagation()"><input type="checkbox" ${e.on?'checked':''} onchange="toggleEv(${i},this.checked)"><span></span></label>
+    </div>`}).join('');
+}
+function renderWeek(){
+  const segs=[[],[],[],[],[],[],[]];
+  EV.forEach(e=>{if(!e.on)return;for(let d=0;d<7;d++){if(!(e.d>>d&1))continue;
+    const a=e.s,b=e.s+e.u;segs[d].push([a,Math.min(b,1440),e.l]);if(b>1440)segs[(d+1)%7].push([0,b-1440,e.l])}});
+  let today=-1,mark=0;
+  if(S&&S.timeSet){const n=nowSec();today=new Date(n*1000).getUTCDay();mark=n%86400/864}
+  let h='';
+  for(let d=0;d<7;d++){
+    h+=`<div class="${d==today?'today':''}">${DS[d]}</div><div class="bar">`+
+      segs[d].map(([a,b,l])=>`<i style="left:${a/14.4}%;width:${Math.max((b-a)/14.4,.6)}%;opacity:${.3+l/143}"></i>`).join('')+
+      (d==today?`<b style="left:${mark}%"></b>`:'')+'</div>'}
+  h+='<div class="ticks"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>';
+  $('week').innerHTML=h;
+}
+async function pushEvents(msg){
+  try{await post('/api/events',{e:EV.map(e=>[e.d,e.s,e.u,e.l,e.fi,e.fo,e.f,e.on].join(',')).join(';')});if(msg)toast(msg)}
+  catch(e){toast('Could not save – check connection')}
+  await refresh(true);
+}
+function toggleEv(i,v){EV[i].on=v?1:0;renderEvents();renderWeek();pushEvents(v?'Event enabled':'Event paused')}
+
+function segSet(id,v){[...$(id).children].forEach(b=>b.classList.toggle('sel',b.dataset.v==v))}
+['evFi','evFo'].forEach(id=>$(id).addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;
+  D[id=='evFi'?'fi':'fo']=+b.dataset.v;segSet(id,b.dataset.v);evHint()}));
+function renderDays(){$('evDays').innerHTML=DS.map((n,i)=>`<button class="${D.d>>i&1?'sel':''}" onclick="D.d^=${1<<i};renderDays()">${n[0]}${n[1]}</button>`).join('')}
+function setDays(v){D.d=v;renderDays()}
+function openEv(i){
+  if(EV.length>=20&&i<0){toast('Maximum 20 events');return}
+  edit=i;D=i<0?{d:127,s:18*60,u:120,l:100,fi:1,fo:1,f:5,on:1}:{...EV[i]};
+  $('evTitle').textContent=i<0?'New event':'Edit event';$('evDel').hidden=i<0;
+  renderDays();$('evStart').value=hm(D.s);$('evH').value=Math.floor(D.u/60);$('evM').value=D.u%60;
+  $('evL').value=D.l;$('evLV').textContent=D.l+'%';$('evF').value=D.f;segSet('evFi',D.fi);segSet('evFo',D.fo);
+  evHint();$('evSheet').classList.add('open');
+}
+function closeEv(){$('evSheet').classList.remove('open')}
+function readDur(){return(+$('evH').value||0)*60+(+$('evM').value||0)}
+function evHint(){
+  const [h,m]=($('evStart').value||'0:0').split(':').map(Number),s=h*60+m,u=readDur();
+  $('fadeBox').hidden=!(D.fi||D.fo);
+  let t=u>0?`Ends at ${hm(s+u)}${s+u>=1440?' (next day)':''} · ${dur(u)}`:'Set a duration';
+  const f=+$('evF').value||0,n=(D.fi?1:0)+(D.fo?1:0);
+  if(n&&u>0&&f*n>u)t+=' · fades will be shortened to fit';
+  $('evEnd').textContent=t;
+}
+async function saveEv(){
+  const st=$('evStart').value,u=readDur(),f=+$('evF').value;
+  if(!D.d){toast('Pick at least one day');return}
+  if(!st){toast('Pick a start time');return}
+  if(u<1||u>1440){toast('Duration must be 1 min – 24 h');return}
+  if((D.fi||D.fo)&&(f<1||f>60)){toast('Fade length: 1–60 minutes');return}
+  const [h,m]=st.split(':').map(Number);
+  Object.assign(D,{s:h*60+m,u,l:+$('evL').value,f:f||D.f});
+  if(edit<0)EV.push(D);else EV[edit]=D;
+  closeEv();renderEvents();renderWeek();await pushEvents('Event saved ✓');
+}
+async function delEv(){if(!confirm('Delete this event?'))return;EV.splice(edit,1);closeEv();renderEvents();renderWeek();await pushEvents('Event deleted')}
+
+/* ---------- settings ---------- */
 async function saveSettings(){
-  try{await post('/api/settings',{freq:$('freq').value,invert:$('invert').value,maxLevel:$('maxLevel').value,sensors:$('sensors').value,tlimit:$('tlimit').value,tz:$('tz').value});toast('נשמר ✔')}catch(e){toast('שגיאה')}
+  try{await post('/api/settings',{maxLevel:$('maxL').value,sensors:$('sens').value,tlimit:$('tlim').value,freq:$('freq').value,invert:$('inv').value});toast('Settings saved ✓');refresh()}
+  catch(e){toast('Could not save')}
 }
 async function saveWifi(){
-  if(!confirm('הבקר יופעל מחדש ויתחבר לרשת. להמשיך?'))return;
-  try{await post('/api/wifi',{ssid:$('ssid').value,pass:$('pass').value})}catch(e){}
-  toast('מופעל מחדש... התחבר שוב דרך http://uvtimer.local');
+  const s=$('ssid').value.trim(),p=$('pass').value;
+  if(!s){toast('Enter a network name');return}
+  if(p&&p.length<8){toast('Password needs 8+ characters');return}
+  if(!confirm(`Restart with network "${s}"${p?'':' (no password)'}?\nReconnect your phone to the new network afterwards.`))return;
+  try{await post('/api/wifi',{ssid:s,pass:p});toast('Restarting… reconnect to '+s)}catch(e){toast(String(e.message||'Error'))}
 }
 
-async function refresh(){
-  try{S=await (await fetch('/api/state')).json()}catch(e){return}
-  const [d,t]=S.time.split(' ');
-  $('clock').textContent=S.timeValid?t:'--:--:--';
-  $('date').textContent=S.timeValid?('יום '+DF[S.wday]+' · '+d.split('-').reverse().join('/')):'';
-  $('timeWarn').style.display=S.timeValid?'none':'block';
-  const on=S.output>0;$('state').textContent=on?'דולק':'כבוי';$('state').className='pill '+(on?'on':'off');
-  $('outp').textContent='יציאה: '+S.output+'%';
-  $('temp').textContent=S.sensors?('🌡 '+S.temps.map(t=>t===null?'--':t.toFixed(1)+'°C').join(' / ')):'';
-  const hw=$('heatWarn');
-  if(S.sensors&&S.fault){hw.style.display='block';hw.textContent='חיישן חום לא מחובר או תקול – העוצמה מוגבלת ל-'+S.tcap+'%'}
-  else if(S.sensors&&S.tcap<100){hw.style.display='block';hw.textContent='הגנת חום פעילה – העוצמה מוגבלת ל-'+S.tcap+'%'}
-  else hw.style.display='none';
-  for(let i=0;i<3;i++)$('m'+i).classList.toggle('sel',S.mode==i);
-  $('manualBox').style.display=S.mode==1?'block':'none';
-  $('net').textContent=S.ap?('מצב נקודת גישה (UV-Timer) · '+S.ip):('מחובר ל-'+S.ssid+' · '+S.ip+' · '+S.rssi+'dBm');
-  if(!loaded){
-    loaded=true;slots=S.slots;renderSlots();
-    $('mlevel').value=S.manualLevel;$('mlv').textContent=S.manualLevel+'%';
-    $('freq').value=S.freq;$('invert').value=S.invert?1:0;$('maxLevel').value=S.maxLevel;$('sensors').value=S.sensors;$('tlimit').value=S.tlimit;$('tz').value=S.tz;$('ssid').value=S.ssid;
-    if(!S.timeValid)syncTime(); // auto-set clock from the phone when there is no internet time
+/* ---------- loop ---------- */
+async function refresh(evToo){
+  let r;try{r=await (await fetch('/api/state',{cache:'no-store'})).json()}catch(e){return}
+  S=r;base=r.now;baseAt=Date.now();
+  if(!loaded||evToo){EV=r.events;renderEvents()}
+  if(!loaded){loaded=true;
+    $('manL').value=r.manualLevel;$('manV').textContent=r.manualLevel+'%';
+    $('maxL').value=r.maxLevel;$('maxV').textContent=r.maxLevel+'%';
+    $('sens').value=r.sensors;$('tlim').value=r.tlimit;$('freq').value=r.freq;$('inv').value=r.invert?1:0;$('ssid').value=r.ssid;
+    $('rtcInfo').textContent=r.rtc?'Clock module (DS3231) detected – time is kept during power cuts.':'No clock module detected – after a power cut, open this page to set the time again.';
+    if(!r.timeSet){syncPhone();return}
   }
+  tick();renderStatus();renderWeek();
 }
-window.onbeforeunload=e=>{if(dirty){e.preventDefault();e.returnValue=''}};
-refresh();setInterval(refresh,1000);
+refresh();
+setInterval(tick,250);
+setInterval(()=>{if(!$('evSheet').classList.contains('open'))refresh()},3000);
 </script>
 </body>
 </html>)HTML";

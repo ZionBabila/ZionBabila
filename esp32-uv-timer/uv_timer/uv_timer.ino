@@ -1,114 +1,173 @@
 /*
- * UV LED Weekly Timer - ESP32 Super Mini (ESP32-C3)
+ * UV LED Weekly Timer - ESP32-C3 Super Mini (offline, access point only)
  *
- * Built-in web page (Hebrew) for setting weekly time slots.
- * Each slot: days of week, start time, end time, brightness (PWM).
- * Settings are saved to flash (Preferences) and survive power loss.
+ * The board creates its own Wi-Fi network. Connect with a phone and the
+ * control page opens automatically (captive portal), or browse to
+ * http://192.168.4.1
+ *
+ * - Clock is set from the phone (one tap) or entered manually.
+ * - Optional DS3231 clock module keeps time through power cuts.
+ * - Events: days, start time, duration, brightness, instant/fade on & off.
+ * - Optional NTC thermistors limit brightness when the heatsink gets hot.
  *
  * Arduino IDE: board "ESP32C3 Dev Module", "USB CDC On Boot: Enabled".
- * Works with ESP32 Arduino core 2.x and 3.x.
+ * Works with ESP32 Arduino core 2.x and 3.x. No extra libraries needed.
  */
 
 #include <WiFi.h>
 #include <WebServer.h>
-#include <ESPmDNS.h>
+#include <DNSServer.h>
 #include <Preferences.h>
+#include <Wire.h>
 #include <time.h>
 #include <sys/time.h>
 #include "page.h"
 
-// ---------- Hardware ----------
-// GPIO4 is safe on the C3 Super Mini. Avoid GPIO2/8/9 (strapping pins).
-const int PWM_PIN = 4;
+// ---------- Pins ----------
+// Avoid GPIO2/8/9 for external parts (boot strapping pins).
+const int PWM_PIN = 4;             // to PWM input of both LED drivers
 const int STATUS_LED_PIN = 8;      // on-board blue LED, active LOW
-const int PWM_BITS = 10;           // duty 0..1023
+const int NTC_PINS[2] = {3, 1};    // thermistor 1 / thermistor 2 (ADC)
+const int I2C_SDA = 5;             // DS3231 SDA (optional)
+const int I2C_SCL = 6;             // DS3231 SCL (optional)
 
-// ---------- Temperature (NTC thermistor, like 3D printers) ----------
-// Wiring per sensor: 3.3V -- 100k resistor -- GPIO -- NTC -- GND
-// (optional 100nF capacitor from GPIO to GND for a steadier reading)
-const int NTC_PINS[2] = {3, 1};    // ADC pins. Sensor 1 = GPIO3, sensor 2 = GPIO1
-const float NTC_R25 = 100000.0f;   // NTC resistance at 25C (100K)
-const float NTC_BETA = 3950.0f;    // B value (3950 is the common one)
-const float NTC_RFIXED = 100000.0f;// fixed resistor to 3.3V (same value as NTC)
-const uint8_t FAULT_CAP = 30;      // max % while a sensor is broken/disconnected
+// ---------- PWM ----------
+const int PWM_BITS = 12;           // 0..4095, smooth fades at low brightness
+const uint32_t PWM_FREQ_MAX = 19000; // max for 12 bits on ESP32-C3
 
-// ---------- Network ----------
-const char *AP_SSID = "UV-Timer";
-const char *AP_PASS = "uvtimer123"; // min 8 chars. Change it.
-const char *HOSTNAME = "uvtimer";   // http://uvtimer.local
-const char *DEFAULT_TZ = "IST-2IDT,M3.4.4/26,M10.5.0"; // Israel
+// ---------- Thermistor (NTC 100K B3950 + 100k resistor to 3.3V) ----------
+const float NTC_R25 = 100000.0f;
+const float NTC_BETA = 3950.0f;
+const float NTC_RFIXED = 100000.0f;
+const uint8_t FAULT_CAP = 30;      // max % while a sensor is broken
 
-// ---------- Schedule ----------
-const int MAX_SLOTS = 16;
+// ---------- Access point defaults ----------
+const char *DEFAULT_SSID = "UV-Timer";
+const char *DEFAULT_PASS = "uvtimer123"; // 8+ chars, or empty for open network
 
-struct Slot {
-  uint8_t days;     // bit0=Sunday ... bit6=Saturday
-  uint16_t start;   // minutes from midnight 0..1439
-  uint16_t end;     // minutes from midnight 0..1439 (end < start = crosses midnight)
-  uint8_t level;    // 0..100 %
+// ---------- Events ----------
+const int MAX_EVENTS = 20;
+
+struct Event {
+  uint8_t days;      // bit0 = Sunday ... bit6 = Saturday
+  uint8_t level;     // brightness 1..100 %
+  uint16_t start;    // minutes after midnight 0..1439
+  uint16_t duration; // minutes 1..1440 (may run past midnight)
+  uint8_t fadeIn;    // 0 = instant on, 1 = fade in
+  uint8_t fadeOut;   // 0 = instant off, 1 = fade out
+  uint8_t fadeMin;   // fade length in minutes 1..60
   uint8_t enabled;
 };
 
 enum Mode : uint8_t { MODE_AUTO = 0, MODE_ON = 1, MODE_OFF = 2 };
 
-Slot slots[MAX_SLOTS];
-int slotCount = 0;
+Event events[MAX_EVENTS];
+int eventCount = 0;
 Mode mode = MODE_AUTO;
 uint8_t manualLevel = 100;
+uint8_t maxLevel = 100;
 uint32_t pwmFreq = 1000;
 bool pwmInvert = false;
-uint8_t maxLevel = 100;           // global limit, protects the LED
-uint8_t sensorCount = 0;          // 0 = no thermal protection, 1 or 2 sensors
-uint8_t tempLimit = 50;           // C, measured on the heatsink
-String tzString = DEFAULT_TZ;
-String wifiSsid, wifiPass;
+uint8_t sensorCount = 0;
+uint8_t tempLimit = 50;
+String apSsid, apPass;
 
 Preferences prefs;
 WebServer server(80);
+DNSServer dns;
 
-bool apMode = false;
-float currentDuty = 0;            // 0..100, ramps toward target
-uint8_t targetLevel = 0;
-float temps[2] = {NAN, NAN};      // NAN = not connected / fault
-float thermalCap = 100;           // % limit set by the thermal controller
+bool rtcFound = false;
+float output = 0;                  // current output %, after all limits
+float temps[2] = {NAN, NAN};
+float thermalCap = 100;
 bool sensorFault = false;
 
-// ---------- Storage ----------
+// ================= Storage =================
 void loadSettings() {
-  prefs.begin("uvtimer", true);
-  slotCount = prefs.getBytes("slots", slots, sizeof(slots)) / sizeof(Slot);
-  if (slotCount > MAX_SLOTS) slotCount = 0;
+  prefs.begin("uvtimer2", true);
+  eventCount = prefs.getBytes("events", events, sizeof(events)) / sizeof(Event);
   mode = (Mode)prefs.getUChar("mode", MODE_AUTO);
   manualLevel = prefs.getUChar("mlevel", 100);
+  maxLevel = prefs.getUChar("maxlvl", 100);
   pwmFreq = prefs.getUInt("freq", 1000);
   pwmInvert = prefs.getBool("invert", false);
-  maxLevel = prefs.getUChar("maxlvl", 100);
   sensorCount = prefs.getUChar("sensors", 0);
   tempLimit = prefs.getUChar("tlimit", 50);
-  tzString = prefs.getString("tz", DEFAULT_TZ);
-  wifiSsid = prefs.getString("ssid", "");
-  wifiPass = prefs.getString("pass", "");
+  apSsid = prefs.getString("ssid", DEFAULT_SSID);
+  apPass = prefs.getString("pass", DEFAULT_PASS);
   prefs.end();
+  if (eventCount > MAX_EVENTS) eventCount = 0;
   if (mode > MODE_OFF) mode = MODE_AUTO;
-  if (pwmFreq < 100 || pwmFreq > 40000) pwmFreq = 1000;
+  if (pwmFreq < 100 || pwmFreq > PWM_FREQ_MAX) pwmFreq = 1000;
   if (sensorCount > 2) sensorCount = 0;
   if (tempLimit < 30 || tempLimit > 90) tempLimit = 50;
+  if (!apSsid.length()) apSsid = DEFAULT_SSID;
 }
 
-void saveSlots() {
-  prefs.begin("uvtimer", false);
-  prefs.putBytes("slots", slots, slotCount * sizeof(Slot));
-  prefs.end();
+// ================= Clock =================
+// The system clock holds LOCAL time (timezone UTC0), so no timezone setup
+// is needed: the phone sends its local time.
+bool timeSet() { return time(nullptr) > 1700000000; }
+
+uint8_t bcd2dec(uint8_t v) { return (v >> 4) * 10 + (v & 0x0F); }
+uint8_t dec2bcd(uint8_t v) { return ((v / 10) << 4) | (v % 10); }
+
+bool rtcRead() {
+  Wire.beginTransmission(0x68);
+  Wire.write(0x0F);
+  if (Wire.endTransmission() != 0) return false;
+  if (Wire.requestFrom((uint8_t)0x68, (uint8_t)1) != 1) return false;
+  if (Wire.read() & 0x80) return false;          // oscillator stopped: time invalid
+
+  Wire.beginTransmission(0x68);
+  Wire.write(0x00);
+  Wire.endTransmission();
+  if (Wire.requestFrom((uint8_t)0x68, (uint8_t)7) != 7) return false;
+  struct tm t = {};
+  t.tm_sec = bcd2dec(Wire.read() & 0x7F);
+  t.tm_min = bcd2dec(Wire.read());
+  t.tm_hour = bcd2dec(Wire.read() & 0x3F);
+  Wire.read();                                   // day of week (unused)
+  t.tm_mday = bcd2dec(Wire.read());
+  t.tm_mon = bcd2dec(Wire.read() & 0x1F) - 1;
+  t.tm_year = bcd2dec(Wire.read()) + 100;
+  time_t epoch = mktime(&t);
+  if (epoch < 1700000000) return false;
+  struct timeval tv = {epoch, 0};
+  settimeofday(&tv, nullptr);
+  return true;
 }
 
-void saveMode() {
-  prefs.begin("uvtimer", false);
-  prefs.putUChar("mode", mode);
-  prefs.putUChar("mlevel", manualLevel);
-  prefs.end();
+void rtcWrite(time_t epoch) {
+  struct tm t;
+  gmtime_r(&epoch, &t);
+  Wire.beginTransmission(0x68);
+  Wire.write(0x00);
+  Wire.write(dec2bcd(t.tm_sec));
+  Wire.write(dec2bcd(t.tm_min));
+  Wire.write(dec2bcd(t.tm_hour));
+  Wire.write(t.tm_wday + 1);
+  Wire.write(dec2bcd(t.tm_mday));
+  Wire.write(dec2bcd(t.tm_mon + 1));
+  Wire.write(dec2bcd(t.tm_year % 100));
+  Wire.endTransmission();
+  Wire.beginTransmission(0x68);                  // clear "oscillator stopped" flag
+  Wire.write(0x0F);
+  Wire.write(0x00);
+  Wire.endTransmission();
 }
 
-// ---------- PWM ----------
+void rtcBegin() {
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.beginTransmission(0x68);
+  rtcFound = Wire.endTransmission() == 0;
+  if (rtcFound) {
+    bool ok = rtcRead();
+    Serial.printf("DS3231 found, time %s\n", ok ? "loaded" : "not set yet");
+  }
+}
+
+// ================= PWM =================
 void pwmBegin() {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
   ledcAttach(PWM_PIN, pwmFreq, PWM_BITS);
@@ -126,9 +185,10 @@ void pwmSetFreq(uint32_t f) {
 #endif
 }
 
-void pwmWritePercent(float pct) {
-  uint32_t maxDuty = (1 << PWM_BITS) - 1;
+void pwmWrite(float pct) {
+  const uint32_t maxDuty = (1 << PWM_BITS) - 1;
   uint32_t duty = (uint32_t)(pct * maxDuty / 100.0f + 0.5f);
+  if (duty > maxDuty) duty = maxDuty;
   if (pwmInvert) duty = maxDuty - duty;
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
   ledcWrite(PWM_PIN, duty);
@@ -137,26 +197,23 @@ void pwmWritePercent(float pct) {
 #endif
 }
 
-// ---------- Temperature ----------
+// ================= Temperature =================
 float readNtc(int pin) {
   uint32_t mv = 0;
   for (int i = 0; i < 16; i++) mv += analogReadMilliVolts(pin);
   mv /= 16;
-  // open circuit -> pulled up to ~3.3V, short -> ~0V
-  if (mv < 40 || mv > 2700) return NAN;
+  if (mv < 40 || mv > 2700) return NAN;          // short / disconnected
   float r = NTC_RFIXED * mv / (3300.0f - mv);
   float k = 1.0f / (1.0f / 298.15f + logf(r / NTC_R25) / NTC_BETA);
   return k - 273.15f;
 }
 
-uint8_t thermalLimit() {
+float thermalLimit() {
   if (sensorCount == 0) return 100;
-  uint8_t cap = (uint8_t)thermalCap;
-  return sensorFault ? min(cap, FAULT_CAP) : cap;
+  return sensorFault ? min(thermalCap, (float)FAULT_CAP) : thermalCap;
 }
 
-// called every second
-void updateThermal() {
+void updateThermal() {                           // every second
   static uint8_t tick = 0;
   if (sensorCount == 0) {
     temps[0] = temps[1] = NAN;
@@ -172,46 +229,54 @@ void updateThermal() {
     if (!isnan(temps[i]) && (isnan(maxT) || temps[i] > maxT)) maxT = temps[i];
   }
   if (isnan(maxT)) return;
-  if (maxT > tempLimit + 15) { thermalCap = 0; return; } // emergency
-  if (++tick < 5) return;                                 // adjust every 5 s
+  if (maxT > tempLimit + 15) { thermalCap = 0; return; }   // emergency off
+  if (++tick < 5) return;
   tick = 0;
   if (maxT > tempLimit) thermalCap = max(0.0f, thermalCap - 5);
   else if (maxT < tempLimit - 2) thermalCap = min(100.0f, thermalCap + 2);
 }
 
-// ---------- Time ----------
-bool timeValid() {
-  return time(nullptr) > 1700000000; // after Nov 2023 = clock was set
-}
-
-bool slotActive(const Slot &s, int wday, int minutes) {
-  if (!s.enabled) return false;
-  int yday = (wday + 6) % 7;
-  bool today = s.days & (1 << wday);
-  bool yesterday = s.days & (1 << yday);
-  if (s.start == s.end) return today;                       // whole day
-  if (s.start < s.end) return today && minutes >= s.start && minutes < s.end;
-  // crosses midnight, e.g. 22:00 -> 06:00
-  return (today && minutes >= s.start) || (yesterday && minutes < s.end);
-}
-
-uint8_t computeTarget() {
-  uint8_t lvl = 0;
-  if (mode == MODE_ON) lvl = manualLevel;
-  else if (mode == MODE_AUTO && timeValid()) {
-    struct tm t;
-    time_t now = time(nullptr);
-    localtime_r(&now, &t);
-    int minutes = t.tm_hour * 60 + t.tm_min;
-    for (int i = 0; i < slotCount; i++)
-      if (slotActive(slots[i], t.tm_wday, minutes) && slots[i].level > lvl)
-        lvl = slots[i].level;
+// ================= Schedule =================
+// Brightness of one event at this moment (0 if not running).
+float eventLevel(const Event &e, int wday, long secOfDay) {
+  if (!e.enabled || !e.duration) return 0;
+  float best = 0;
+  long dur = e.duration * 60L;
+  for (int back = 0; back < 2; back++) {         // started today or yesterday
+    int d = (wday + 7 - back) % 7;
+    if (!(e.days & (1 << d))) continue;
+    long el = secOfDay + back * 86400L - e.start * 60L;
+    if (el < 0 || el >= dur) continue;
+    float fade = e.fadeMin * 60.0f;
+    int fades = (e.fadeIn ? 1 : 0) + (e.fadeOut ? 1 : 0);
+    if (fades && fade * fades > dur) fade = (float)dur / fades;
+    float env = 1;
+    if (e.fadeIn && fade > 0) env = min(env, el / fade);
+    if (e.fadeOut && fade > 0) env = min(env, (dur - el) / fade);
+    best = max(best, e.level * env * env);       // squared = smoother to the eye
   }
-  // no valid time in AUTO mode -> stay OFF (safe)
-  return min(min(lvl, maxLevel), thermalLimit());
+  return best;
 }
 
-// ---------- Helpers ----------
+float scheduleLevel() {
+  if (!timeSet()) return 0;                      // unknown time -> stay off
+  time_t now = time(nullptr);
+  struct tm t;
+  gmtime_r(&now, &t);
+  long sec = t.tm_hour * 3600L + t.tm_min * 60L + t.tm_sec;
+  float lvl = 0;
+  for (int i = 0; i < eventCount; i++) lvl = max(lvl, eventLevel(events[i], t.tm_wday, sec));
+  return lvl;
+}
+
+float computeOutput() {
+  float lvl = 0;
+  if (mode == MODE_ON) lvl = manualLevel;
+  else if (mode == MODE_AUTO) lvl = scheduleLevel();
+  return min(min(lvl, (float)maxLevel), thermalLimit());
+}
+
+// ================= Web =================
 String jsonEscape(const String &s) {
   String o;
   for (char c : s) {
@@ -222,119 +287,116 @@ String jsonEscape(const String &s) {
   return o;
 }
 
-// ---------- Web handlers ----------
 void handleRoot() {
+  server.sendHeader("Cache-Control", "no-store");
   server.send_P(200, "text/html; charset=utf-8", INDEX_HTML);
 }
 
 void handleState() {
-  time_t now = time(nullptr);
-  struct tm t;
-  localtime_r(&now, &t);
-  char buf[32];
-  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
-
   String j = "{";
-  j += "\"time\":\"" + String(buf) + "\",";
-  j += "\"wday\":" + String(t.tm_wday) + ",";
-  j += "\"timeValid\":" + String(timeValid() ? "true" : "false") + ",";
+  j += "\"now\":" + String((long)time(nullptr)) + ",";
+  j += "\"timeSet\":" + String(timeSet() ? "true" : "false") + ",";
+  j += "\"rtc\":" + String(rtcFound ? "true" : "false") + ",";
   j += "\"mode\":" + String(mode) + ",";
   j += "\"manualLevel\":" + String(manualLevel) + ",";
-  j += "\"output\":" + String((int)(currentDuty + 0.5f)) + ",";
+  j += "\"output\":" + String(output, 1) + ",";
+  j += "\"maxLevel\":" + String(maxLevel) + ",";
   j += "\"freq\":" + String(pwmFreq) + ",";
   j += "\"invert\":" + String(pwmInvert ? "true" : "false") + ",";
-  j += "\"maxLevel\":" + String(maxLevel) + ",";
   j += "\"sensors\":" + String(sensorCount) + ",";
   j += "\"tlimit\":" + String(tempLimit) + ",";
-  j += "\"tcap\":" + String(thermalLimit()) + ",";
+  j += "\"tcap\":" + String((int)thermalLimit()) + ",";
   j += "\"fault\":" + String(sensorFault ? "true" : "false") + ",";
   j += "\"temps\":[";
   for (int i = 0; i < sensorCount; i++) {
     if (i) j += ",";
     j += isnan(temps[i]) ? String("null") : String(temps[i], 1);
   }
-  j += "],";
-  j += "\"tz\":\"" + jsonEscape(tzString) + "\",";
-  j += "\"ssid\":\"" + jsonEscape(wifiSsid) + "\",";
-  j += "\"ap\":" + String(apMode ? "true" : "false") + ",";
-  j += "\"ip\":\"" + (apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString()) + "\",";
-  j += "\"rssi\":" + String(apMode ? 0 : WiFi.RSSI()) + ",";
-  j += "\"slots\":[";
-  for (int i = 0; i < slotCount; i++) {
+  j += "],\"ssid\":\"" + jsonEscape(apSsid) + "\",";
+  j += "\"events\":[";
+  for (int i = 0; i < eventCount; i++) {
+    const Event &e = events[i];
     if (i) j += ",";
-    j += "{\"d\":" + String(slots[i].days) + ",\"s\":" + String(slots[i].start) +
-         ",\"e\":" + String(slots[i].end) + ",\"l\":" + String(slots[i].level) +
-         ",\"on\":" + String(slots[i].enabled) + "}";
+    j += "{\"d\":" + String(e.days) + ",\"s\":" + String(e.start) + ",\"u\":" + String(e.duration) +
+         ",\"l\":" + String(e.level) + ",\"fi\":" + String(e.fadeIn) + ",\"fo\":" + String(e.fadeOut) +
+         ",\"f\":" + String(e.fadeMin) + ",\"on\":" + String(e.enabled) + "}";
   }
   j += "]}";
+  server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", j);
 }
 
-// body field "s" = "days,start,end,level,enabled;days,start,end,level,enabled;..."
-void handleSlots() {
-  String s = server.arg("s");
-  Slot tmp[MAX_SLOTS];
+// body "e" = "days,start,duration,level,fadeIn,fadeOut,fadeMin,enabled;..."
+void handleEvents() {
+  String s = server.arg("e");
+  Event tmp[MAX_EVENTS];
   int n = 0, pos = 0;
-  while (pos < (int)s.length() && n < MAX_SLOTS) {
+  while (pos < (int)s.length() && n < MAX_EVENTS) {
     int sep = s.indexOf(';', pos);
     if (sep < 0) sep = s.length();
     String item = s.substring(pos, sep);
     pos = sep + 1;
-    int v[5], k = 0, p = 0;
-    while (k < 5) {
+    long v[8];
+    int k = 0, p = 0;
+    while (k < 8 && p <= (int)item.length()) {
       int c = item.indexOf(',', p);
       if (c < 0) c = item.length();
       v[k++] = item.substring(p, c).toInt();
-      if (c >= (int)item.length()) break;
       p = c + 1;
     }
-    if (k < 5) continue;
-    tmp[n].days = v[0] & 0x7F;
-    tmp[n].start = constrain(v[1], 0, 1439);
-    tmp[n].end = constrain(v[2], 0, 1439);
-    tmp[n].level = constrain(v[3], 0, 100);
-    tmp[n].enabled = v[4] ? 1 : 0;
-    n++;
+    if (k < 8) continue;
+    Event &e = tmp[n++];
+    e.days = v[0] & 0x7F;
+    e.start = constrain(v[1], 0, 1439);
+    e.duration = constrain(v[2], 1, 1440);
+    e.level = constrain(v[3], 1, 100);
+    e.fadeIn = v[4] ? 1 : 0;
+    e.fadeOut = v[5] ? 1 : 0;
+    e.fadeMin = constrain(v[6], 1, 60);
+    e.enabled = v[7] ? 1 : 0;
   }
-  memcpy(slots, tmp, sizeof(Slot) * n);
-  slotCount = n;
-  saveSlots();
+  memcpy(events, tmp, sizeof(Event) * n);
+  eventCount = n;
+  prefs.begin("uvtimer2", false);
+  prefs.putBytes("events", events, eventCount * sizeof(Event));
+  prefs.end();
   server.send(200, "text/plain", "OK");
 }
 
 void handleMode() {
   if (server.hasArg("mode")) mode = (Mode)constrain(server.arg("mode").toInt(), 0, 2);
   if (server.hasArg("level")) manualLevel = constrain(server.arg("level").toInt(), 0, 100);
-  saveMode();
+  prefs.begin("uvtimer2", false);
+  prefs.putUChar("mode", mode);
+  prefs.putUChar("mlevel", manualLevel);
+  prefs.end();
   server.send(200, "text/plain", "OK");
 }
 
-// browser sends its own clock (UTC epoch seconds) - works without internet
+// "t" = local time in seconds (phone's local clock, or manual entry)
 void handleTime() {
-  long long epoch = atoll(server.arg("epoch").c_str());
-  if (epoch > 1700000000LL) {
-    struct timeval tv = { (time_t)epoch, 0 };
-    settimeofday(&tv, nullptr);
-    server.send(200, "text/plain", "OK");
-  } else {
-    server.send(400, "text/plain", "bad epoch");
-  }
+  long long t = atoll(server.arg("t").c_str());
+  if (t < 1700000000LL || t > 4000000000LL) { server.send(400, "text/plain", "bad time"); return; }
+  struct timeval tv = {(time_t)t, 0};
+  settimeofday(&tv, nullptr);
+  if (rtcFound) rtcWrite((time_t)t);
+  server.send(200, "text/plain", "OK");
 }
 
 void handleSettings() {
-  prefs.begin("uvtimer", false);
+  prefs.begin("uvtimer2", false);
+  if (server.hasArg("maxLevel")) {
+    maxLevel = constrain(server.arg("maxLevel").toInt(), 1, 100);
+    prefs.putUChar("maxlvl", maxLevel);
+  }
   if (server.hasArg("freq")) {
-    uint32_t f = constrain(server.arg("freq").toInt(), 100, 40000);
+    uint32_t f = constrain(server.arg("freq").toInt(), 100, (long)PWM_FREQ_MAX);
     if (f != pwmFreq) { pwmFreq = f; pwmSetFreq(pwmFreq); }
     prefs.putUInt("freq", pwmFreq);
   }
   if (server.hasArg("invert")) {
     pwmInvert = server.arg("invert") == "1";
     prefs.putBool("invert", pwmInvert);
-  }
-  if (server.hasArg("maxLevel")) {
-    maxLevel = constrain(server.arg("maxLevel").toInt(), 0, 100);
-    prefs.putUChar("maxlvl", maxLevel);
   }
   if (server.hasArg("sensors")) {
     sensorCount = constrain(server.arg("sensors").toInt(), 0, 2);
@@ -344,105 +406,87 @@ void handleSettings() {
     tempLimit = constrain(server.arg("tlimit").toInt(), 30, 90);
     prefs.putUChar("tlimit", tempLimit);
   }
-  if (server.hasArg("tz") && server.arg("tz").length() > 2) {
-    tzString = server.arg("tz");
-    prefs.putString("tz", tzString);
-    setenv("TZ", tzString.c_str(), 1);
-    tzset();
-  }
   prefs.end();
   server.send(200, "text/plain", "OK");
 }
 
 void handleWifi() {
-  prefs.begin("uvtimer", false);
-  prefs.putString("ssid", server.arg("ssid"));
-  prefs.putString("pass", server.arg("pass"));
+  String ssid = server.arg("ssid"), pass = server.arg("pass");
+  ssid.trim();
+  if (!ssid.length() || ssid.length() > 32 || (pass.length() && pass.length() < 8) || pass.length() > 63) {
+    server.send(400, "text/plain", "Name 1-32 chars, password empty or 8-63 chars");
+    return;
+  }
+  prefs.begin("uvtimer2", false);
+  prefs.putString("ssid", ssid);
+  prefs.putString("pass", pass);
   prefs.end();
-  server.send(200, "text/plain", "OK - restarting");
+  server.send(200, "text/plain", "OK");
   delay(500);
   ESP.restart();
 }
 
-// ---------- WiFi ----------
-void startWifi() {
-  WiFi.setHostname(HOSTNAME);
-  if (wifiSsid.length()) {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
-    // Many C3 Super Mini boards connect much better with reduced TX power
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
-    Serial.printf("Connecting to %s", wifiSsid.c_str());
-    for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
-      delay(500);
-      Serial.print(".");
-    }
-    Serial.println();
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    apMode = false;
-    WiFi.setAutoReconnect(true);
-    Serial.printf("Connected. IP: %s\n", WiFi.localIP().toString().c_str());
-    configTzTime(tzString.c_str(), "pool.ntp.org", "time.google.com");
-  } else {
-    apMode = true;
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASS);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
-    setenv("TZ", tzString.c_str(), 1);
-    tzset();
-    Serial.printf("AP mode: %s / %s  -> http://%s\n", AP_SSID, AP_PASS,
-                  WiFi.softAPIP().toString().c_str());
-  }
-  if (MDNS.begin(HOSTNAME)) MDNS.addService("http", "tcp", 80);
+// Phones probe these URLs; redirecting them opens the page automatically.
+void handleCaptive() {
+  server.sendHeader("Location", "http://192.168.4.1/", true);
+  server.send(302, "text/plain", "");
 }
 
-// ---------- Main ----------
+// ================= Main =================
 void setup() {
-  // Make sure the LED is OFF from the first moment
   pinMode(PWM_PIN, OUTPUT);
-  digitalWrite(PWM_PIN, LOW);
+  digitalWrite(PWM_PIN, LOW);                    // LED off from the first moment
   pinMode(STATUS_LED_PIN, OUTPUT);
   digitalWrite(STATUS_LED_PIN, HIGH);
 
   Serial.begin(115200);
   delay(300);
+  setenv("TZ", "UTC0", 1);
+  tzset();
   loadSettings();
   pwmBegin();
-  pwmWritePercent(0);
+  pwmWrite(0);
   analogReadResolution(12);
+  rtcBegin();
 
-  startWifi();
+  IPAddress ip(192, 168, 4, 1);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(ip, ip, IPAddress(255, 255, 255, 0));
+  WiFi.softAP(apSsid.c_str(), apPass.length() ? apPass.c_str() : nullptr);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);            // more stable on C3 Super Mini
+  dns.start(53, "*", ip);
+  Serial.printf("Wi-Fi: %s  ->  http://192.168.4.1\n", apSsid.c_str());
 
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/state", HTTP_GET, handleState);
-  server.on("/api/slots", HTTP_POST, handleSlots);
+  server.on("/api/events", HTTP_POST, handleEvents);
   server.on("/api/mode", HTTP_POST, handleMode);
   server.on("/api/time", HTTP_POST, handleTime);
   server.on("/api/settings", HTTP_POST, handleSettings);
   server.on("/api/wifi", HTTP_POST, handleWifi);
-  server.onNotFound([]() { server.sendHeader("Location", "/"); server.send(302); });
+  server.onNotFound(handleCaptive);
   server.begin();
 }
 
 void loop() {
+  dns.processNextRequest();
   server.handleClient();
 
-  static uint32_t lastCheck = 0, lastRamp = 0;
+  static uint32_t lastSec = 0, lastOut = 0, lastRtc = 0;
   uint32_t ms = millis();
 
-  if (ms - lastCheck >= 1000) {
-    lastCheck = ms;
+  if (ms - lastSec >= 1000) {
+    lastSec = ms;
     updateThermal();
-    targetLevel = computeTarget();
-    digitalWrite(STATUS_LED_PIN, targetLevel ? LOW : HIGH); // blue LED mirrors UV state
   }
-
-  // soft ramp: full 0->100% in about 2 seconds
-  if (ms - lastRamp >= 20) {
-    lastRamp = ms;
-    if (currentDuty < targetLevel) currentDuty = min((float)targetLevel, currentDuty + 1.0f);
-    else if (currentDuty > targetLevel) currentDuty = max((float)targetLevel, currentDuty - 1.0f);
-    pwmWritePercent(currentDuty);
+  if (ms - lastOut >= 50) {                      // 20 updates/s = smooth fades
+    lastOut = ms;
+    output = computeOutput();
+    pwmWrite(output);
+    digitalWrite(STATUS_LED_PIN, output > 0 ? LOW : HIGH);
+  }
+  if (rtcFound && ms - lastRtc >= 3600000UL) {   // re-sync from DS3231 hourly
+    lastRtc = ms;
+    rtcRead();
   }
 }
