@@ -355,7 +355,9 @@ void handleRoot() {
 }
 
 void handleState() {
-  String j = "{";
+  String j;
+  j.reserve(512 + eventCount * 110);
+  j = "{";
   j += "\"now\":" + String((long)time(nullptr)) + ",";
   j += "\"timeSet\":" + String(timeSet() ? "true" : "false") + ",";
   j += "\"rtc\":" + String(rtcFound ? "true" : "false") + ",";
@@ -393,6 +395,7 @@ void handleState() {
 // body "e" = "days,start,duration,level,fadeIn,fadeOut,fadeSec,enabled,
 //              pattern,upSec,holdSec,downSec,offSec;..."
 void handleEvents() {
+  if (!server.hasArg("e")) { server.send(400, "text/plain", "missing e"); return; }
   String s = server.arg("e");
   Event tmp[MAX_EVENTS];
   int n = 0, pos = 0;
@@ -445,7 +448,7 @@ void handleMode() {
 // "t" = local time in seconds (phone's local clock, or manual entry)
 void handleTime() {
   long long t = atoll(server.arg("t").c_str());
-  if (t < 1700000000LL || t > 4000000000LL) { server.send(400, "text/plain", "bad time"); return; }
+  if (t < 1700000000LL || t > 2147000000LL) { server.send(400, "text/plain", "bad time"); return; }
   struct timeval tv = {(time_t)t, 0};
   settimeofday(&tv, nullptr);
   if (rtcFound) rtcWrite((time_t)t);

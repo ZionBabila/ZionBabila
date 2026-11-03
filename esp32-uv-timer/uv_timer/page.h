@@ -87,6 +87,8 @@ details[open] summary .chev{transform:rotate(180deg)}
 <body>
 <main>
 
+<div class="banner bad" id="offline" hidden style="margin:0 0 14px">Connection lost – make sure your phone is still connected to the timer's Wi‑Fi.</div>
+
 <!-- UV safety -->
 <section class="uvw" role="alert">
   <div class="ico">⚠</div>
@@ -215,6 +217,7 @@ details[open] summary .chev{transform:rotate(180deg)}
     </div>
     <div class="actions">
       <button class="danger" id="evDel" onclick="delEv()">Delete</button>
+      <button class="ghost" id="evDup" onclick="dupEv()">Duplicate</button>
       <span class="grow"></span>
       <button onclick="closeEv()">Cancel</button>
       <button class="pri" onclick="saveEv()">Save</button>
@@ -278,10 +281,10 @@ function saveTime(){
 
 /* ---------- status ---------- */
 function activeEnd(now){
-  const wd=new Date(now*1000).getUTCDay(),sod=now%86400;let end=null;
+  const wd=new Date(now*1000).getUTCDay(),sod=now%86400;let end=null,iv=false;
   EV.forEach(e=>{if(!e.on)return;for(let b=0;b<2;b++){if(!(e.d>>((wd+7-b)%7)&1))continue;
-    const el=sod+b*86400-e.s*60;if(el>=0&&el<e.u*60){const t=now-el+e.u*60;if(end===null||t>end)end=t}}});
-  return end;
+    const el=sod+b*86400-e.s*60;if(el>=0&&el<e.u*60){const t=now-el+e.u*60;if(end===null||t>end){end=t;iv=!!e.p}}}});
+  return end===null?null:{end,iv};
 }
 function nextStart(now){
   const wd=new Date(now*1000).getUTCDay(),day0=now-now%86400;let best=null;
@@ -297,8 +300,8 @@ function renderStatus(){
   if(S.mode==1)sub='Always on (manual)';
   else if(S.mode==2)sub='Turned off (manual)';
   else if(!S.timeSet)sub='Waiting for clock';
-  else{const now=nowSec(),end=activeEnd(now),nx=nextStart(now);
-    if(end)sub=`Until ${hm(Math.floor(end%86400/60))}`;
+  else{const now=nowSec(),a=activeEnd(now),nx=nextStart(now);
+    if(a)sub=`${a.iv?'Interval running':'Running'} until ${hm(Math.floor(a.end%86400/60))}`;
     else if(nx){const d=new Date(nx*1000),k=Math.floor(nx/86400)-Math.floor(now/86400);
       sub=`Next: ${k==0?'today':k==1?'tomorrow':DS[d.getUTCDay()]} ${hm(Math.floor(nx%86400/60))} · in ${inTxt(nx-now)}`}
     else sub='No upcoming events'}
@@ -350,7 +353,7 @@ function renderWeek(){
 }
 async function pushEvents(msg){
   try{await post('/api/events',{e:EV.map(e=>[e.d,e.s,e.u,e.l,e.fi,e.fo,e.f,e.on,e.p,e.iu,e.ih,e.id,e.io].join(',')).join(';')});if(msg)toast(msg)}
-  catch(e){toast('Could not save – check connection')}
+  catch(e){toast('Could not save – check connection');needEv=true}
   await refresh(true);
 }
 function toggleEv(i,v){EV[i].on=v?1:0;renderEvents();renderWeek();pushEvents(v?'Event enabled':'Event paused')}
@@ -363,7 +366,7 @@ function setDays(v){D.d=v;renderDays()}
 function openEv(i){
   if(EV.length>=20&&i<0){toast('Maximum 20 events');return}
   edit=i;D=i<0?{d:127,s:18*60,u:120,l:100,fi:1,fo:1,f:10,on:1,p:0,iu:60,ih:0,id:60,io:60}:{...EV[i]};
-  $('evTitle').textContent=i<0?'New event':'Edit event';$('evDel').hidden=i<0;
+  $('evTitle').textContent=i<0?'New event':'Edit event';$('evDel').hidden=i<0;$('evDup').hidden=i<0;
   renderDays();$('evStart').value=hm(D.s);$('evH').value=Math.floor(D.u/60);$('evM').value=D.u%60;
   $('evL').value=D.l;$('evLV').textContent=D.l+'%';$('evF').value=D.f;segSet('evFi',D.fi);segSet('evFo',D.fo);segSet('evP',D.p);
   $('ivU').value=D.iu;$('ivH').value=D.ih;$('ivD').value=D.id;$('ivO').value=D.io;
@@ -378,7 +381,7 @@ function evHint(){
   if(D.p)ivPreview(u);
   let t=u>0?`Ends at ${hm(s+u)}${s+u>=1440?' (next day)':''} · ${dur(u)}`:'Set a duration';
   const f=+$('evF').value||0,n=(D.fi?1:0)+(D.fo?1:0);
-  if(n&&u>0&&f*n>u*60)t+=' · fades will be shortened to fit';
+  if(!D.p&&n&&u>0&&f*n>u*60)t+=' · fades will be shortened to fit';
   $('evEnd').textContent=t;
 }
 function readIv(){return['ivU','ivH','ivD','ivO'].map(id=>Math.round(+$(id).value||0))}
@@ -393,7 +396,7 @@ function ivPreview(u){
   $('ivHint').textContent=`One cycle: ${fadeTxt(c)}`+(u>0?` · repeats ${n}× in ${dur(u)}`:'');
 }
 async function saveEv(){
-  const st=$('evStart').value,u=readDur(),f=+$('evF').value;
+  const st=$('evStart').value,u=readDur(),f=Math.round(+$('evF').value);
   if(!D.d){toast('Pick at least one day');return}
   if(!st){toast('Pick a start time');return}
   if(u<1||u>1440){toast('Duration must be 1 min – 24 h');return}
@@ -405,6 +408,11 @@ async function saveEv(){
   Object.assign(D,{s:h*60+m,u,l:+$('evL').value,f:f||D.f});
   if(edit<0)EV.push(D);else EV[edit]=D;
   closeEv();renderEvents();renderWeek();await pushEvents('Event saved ✓');
+}
+function dupEv(){
+  if(EV.length>=20){toast('Maximum 20 events');return}
+  edit=-1;D={...D};$('evTitle').textContent='New event (copy)';$('evDel').hidden=true;$('evDup').hidden=true;
+  toast('Copy – change it and tap Save');
 }
 async function delEv(){if(!confirm('Delete this event?'))return;EV.splice(edit,1);closeEv();renderEvents();renderWeek();await pushEvents('Event deleted')}
 
@@ -422,10 +430,13 @@ async function saveWifi(){
 }
 
 /* ---------- loop ---------- */
+let fails=0,needEv=false;
 async function refresh(evToo){
-  let r;try{r=await (await fetch('/api/state',{cache:'no-store'})).json()}catch(e){return}
+  let r;try{r=await (await fetch('/api/state',{cache:'no-store'})).json()}
+  catch(e){if(++fails>=2)$('offline').hidden=false;return}
+  fails=0;$('offline').hidden=true;
   S=r;base=r.now;baseAt=Date.now();
-  if(!loaded||evToo){EV=r.events;renderEvents()}
+  if(!loaded||evToo||needEv){EV=r.events;needEv=false;renderEvents()}
   if(!loaded){loaded=true;
     $('manL').value=r.manualLevel;$('manV').textContent=r.manualLevel+'%';
     $('maxL').value=r.maxLevel;$('maxV').textContent=r.maxLevel+'%';
@@ -435,6 +446,7 @@ async function refresh(evToo){
   }
   tick();renderStatus();renderWeek();
 }
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeEv();$('tSheet').classList.remove('open')}});
 refresh();
 setInterval(tick,250);
 setInterval(()=>{if(!$('evSheet').classList.contains('open'))refresh()},3000);
