@@ -53,6 +53,8 @@ label.f{display:block;font-size:13px;color:var(--mut);margin:14px 0 6px}
 .week{display:grid;grid-template-columns:34px 1fr;gap:6px 8px;align-items:center;font-size:12px;color:var(--mut)}
 .bar{position:relative;height:16px;background:var(--bg);border-radius:5px;overflow:hidden}
 .bar i{position:absolute;top:0;bottom:0;background:var(--acc);border-radius:3px}
+.bar i.iv{background:repeating-linear-gradient(90deg,var(--acc) 0 3px,transparent 3px 6px)}
+.wave{width:100%;height:70px;margin-top:12px;background:var(--bg);border-radius:10px}
 .bar b{position:absolute;top:-2px;bottom:-2px;width:2px;background:#fff}
 .today{color:var(--fg);font-weight:700}
 .ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);grid-column:2}
@@ -188,6 +190,20 @@ details[open] summary .chev{transform:rotate(180deg)}
     <div class="hint" id="evEnd"></div>
     <label class="f">Brightness <b id="evLV" style="color:var(--fg)"></b></label>
     <input type="range" id="evL" min="1" max="100" oninput="evLV.textContent=this.value+'%'">
+    <label class="f">Pattern</label>
+    <div class="seg" id="evP"><button data-v="0">Steady</button><button data-v="1">Interval</button></div>
+    <div id="ivBox">
+      <div class="hint">Repeats this cycle from start to end of the event. Times in seconds.</div>
+      <div class="two">
+        <div><label class="f">Fade up (s)</label><input type="number" id="ivU" min="0" max="3600" inputmode="numeric" oninput="evHint()"></div>
+        <div><label class="f">Stay on (s)</label><input type="number" id="ivH" min="0" max="3600" inputmode="numeric" oninput="evHint()"></div>
+        <div><label class="f">Fade down (s)</label><input type="number" id="ivD" min="0" max="3600" inputmode="numeric" oninput="evHint()"></div>
+        <div><label class="f">Stay off (s)</label><input type="number" id="ivO" min="0" max="3600" inputmode="numeric" oninput="evHint()"></div>
+      </div>
+      <svg class="wave" id="ivWave" viewBox="0 0 300 70" preserveAspectRatio="none"></svg>
+      <div class="hint" id="ivHint"></div>
+    </div>
+    <div id="steadyBox">
     <div class="two">
       <div><label class="f">Turn on</label><div class="seg" id="evFi"><button data-v="0">Instant</button><button data-v="1">Fade in</button></div></div>
       <div><label class="f">Turn off</label><div class="seg" id="evFo"><button data-v="0">Instant</button><button data-v="1">Fade out</button></div></div>
@@ -195,6 +211,7 @@ details[open] summary .chev{transform:rotate(180deg)}
     <div id="fadeBox">
        <label class="f">Fade length (seconds)</label>
       <input type="number" id="evF" min="1" max="3600" inputmode="numeric" oninput="evHint()">
+    </div>
     </div>
     <div class="actions">
       <button class="danger" id="evDel" onclick="delEv()">Delete</button>
@@ -312,42 +329,44 @@ function renderEvents(){
       <div class="lvl" style="opacity:${.25+e.l/133}"></div>
       <div class="grow"><div class="t">${hm(e.s)} – ${hm(end)}${end>=1440?' <span class="mut">+1</span>':''}</div>
       <div class="mut">${daysTxt(e.d)} · ${e.l}% · ${dur(e.u)}</div>
-      <div class="mut">${e.fi?'Fade in':'Instant on'} → ${e.fo?'fade out':'instant off'}${e.fi||e.fo?` (${fadeTxt(e.f)})`:''}</div></div>
+      <div class="mut">${e.p?`Interval: ↑${fadeTxt(e.iu)} · on ${fadeTxt(e.ih)} · ↓${fadeTxt(e.id)} · off ${fadeTxt(e.io)}`:
+        `${e.fi?'Fade in':'Instant on'} → ${e.fo?'fade out':'instant off'}${e.fi||e.fo?` (${fadeTxt(e.f)})`:''}`}</div></div>
       <label class="sw" onclick="event.stopPropagation()"><input type="checkbox" ${e.on?'checked':''} onchange="toggleEv(${i},this.checked)"><span></span></label>
     </div>`}).join('');
 }
 function renderWeek(){
   const segs=[[],[],[],[],[],[],[]];
   EV.forEach(e=>{if(!e.on)return;for(let d=0;d<7;d++){if(!(e.d>>d&1))continue;
-    const a=e.s,b=e.s+e.u;segs[d].push([a,Math.min(b,1440),e.l]);if(b>1440)segs[(d+1)%7].push([0,b-1440,e.l])}});
+    const a=e.s,b=e.s+e.u;segs[d].push([a,Math.min(b,1440),e.l,e.p]);if(b>1440)segs[(d+1)%7].push([0,b-1440,e.l,e.p])}});
   let today=-1,mark=0;
   if(S&&S.timeSet){const n=nowSec();today=new Date(n*1000).getUTCDay();mark=n%86400/864}
   let h='';
   for(let d=0;d<7;d++){
     h+=`<div class="${d==today?'today':''}">${DS[d]}</div><div class="bar">`+
-      segs[d].map(([a,b,l])=>`<i style="left:${a/14.4}%;width:${Math.max((b-a)/14.4,.6)}%;opacity:${.3+l/143}"></i>`).join('')+
+      segs[d].map(([a,b,l,iv])=>`<i class="${iv?'iv':''}" style="left:${a/14.4}%;width:${Math.max((b-a)/14.4,.6)}%;opacity:${.3+l/143}"></i>`).join('')+
       (d==today?`<b style="left:${mark}%"></b>`:'')+'</div>'}
   h+='<div class="ticks"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>';
   $('week').innerHTML=h;
 }
 async function pushEvents(msg){
-  try{await post('/api/events',{e:EV.map(e=>[e.d,e.s,e.u,e.l,e.fi,e.fo,e.f,e.on].join(',')).join(';')});if(msg)toast(msg)}
+  try{await post('/api/events',{e:EV.map(e=>[e.d,e.s,e.u,e.l,e.fi,e.fo,e.f,e.on,e.p,e.iu,e.ih,e.id,e.io].join(',')).join(';')});if(msg)toast(msg)}
   catch(e){toast('Could not save – check connection')}
   await refresh(true);
 }
 function toggleEv(i,v){EV[i].on=v?1:0;renderEvents();renderWeek();pushEvents(v?'Event enabled':'Event paused')}
 
 function segSet(id,v){[...$(id).children].forEach(b=>b.classList.toggle('sel',b.dataset.v==v))}
-['evFi','evFo'].forEach(id=>$(id).addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;
-  D[id=='evFi'?'fi':'fo']=+b.dataset.v;segSet(id,b.dataset.v);evHint()}));
+['evFi','evFo','evP'].forEach(id=>$(id).addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;
+  D[{evFi:'fi',evFo:'fo',evP:'p'}[id]]=+b.dataset.v;segSet(id,b.dataset.v);evHint()}));
 function renderDays(){$('evDays').innerHTML=DS.map((n,i)=>`<button class="${D.d>>i&1?'sel':''}" onclick="D.d^=${1<<i};renderDays()">${n[0]}${n[1]}</button>`).join('')}
 function setDays(v){D.d=v;renderDays()}
 function openEv(i){
   if(EV.length>=20&&i<0){toast('Maximum 20 events');return}
-  edit=i;D=i<0?{d:127,s:18*60,u:120,l:100,fi:1,fo:1,f:10,on:1}:{...EV[i]};
+  edit=i;D=i<0?{d:127,s:18*60,u:120,l:100,fi:1,fo:1,f:10,on:1,p:0,iu:60,ih:0,id:60,io:60}:{...EV[i]};
   $('evTitle').textContent=i<0?'New event':'Edit event';$('evDel').hidden=i<0;
   renderDays();$('evStart').value=hm(D.s);$('evH').value=Math.floor(D.u/60);$('evM').value=D.u%60;
-  $('evL').value=D.l;$('evLV').textContent=D.l+'%';$('evF').value=D.f;segSet('evFi',D.fi);segSet('evFo',D.fo);
+  $('evL').value=D.l;$('evLV').textContent=D.l+'%';$('evF').value=D.f;segSet('evFi',D.fi);segSet('evFo',D.fo);segSet('evP',D.p);
+  $('ivU').value=D.iu;$('ivH').value=D.ih;$('ivD').value=D.id;$('ivO').value=D.io;
   evHint();$('evSheet').classList.add('open');
 }
 function closeEv(){$('evSheet').classList.remove('open')}
@@ -355,17 +374,33 @@ function readDur(){return(+$('evH').value||0)*60+(+$('evM').value||0)}
 function evHint(){
   const [h,m]=($('evStart').value||'0:0').split(':').map(Number),s=h*60+m,u=readDur();
   $('fadeBox').hidden=!(D.fi||D.fo);
+  $('ivBox').hidden=!D.p;$('steadyBox').hidden=!!D.p;
+  if(D.p)ivPreview(u);
   let t=u>0?`Ends at ${hm(s+u)}${s+u>=1440?' (next day)':''} · ${dur(u)}`:'Set a duration';
   const f=+$('evF').value||0,n=(D.fi?1:0)+(D.fo?1:0);
   if(n&&u>0&&f*n>u*60)t+=' · fades will be shortened to fit';
   $('evEnd').textContent=t;
+}
+function readIv(){return['ivU','ivH','ivD','ivO'].map(id=>Math.round(+$(id).value||0))}
+function ivPreview(u){
+  const [a,h,d,o]=readIv(),c=a+h+d+o;
+  if(c<=0){$('ivWave').innerHTML='';$('ivHint').textContent='Set at least one time above 0';return}
+  const W=150/c,top=8,bot=62;let x=0,pts=[];
+  for(let k=0;k<2;k++){pts.push([x,bot]);x+=a*W;pts.push([x,top]);x+=h*W;pts.push([x,top]);x+=d*W;pts.push([x,bot]);x+=o*W;pts.push([x,bot])}
+  const pl=pts.map(p=>p.map(v=>v.toFixed(1)).join(',')).join(' ');
+  $('ivWave').innerHTML=`<polygon points="0,${bot} ${pl} 300,${bot}" fill="#9d5cff33"/><polyline points="${pl}" fill="none" stroke="#9d5cff" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;
+  const n=u>0?Math.floor(u*60/c):0;
+  $('ivHint').textContent=`One cycle: ${fadeTxt(c)}`+(u>0?` · repeats ${n}× in ${dur(u)}`:'');
 }
 async function saveEv(){
   const st=$('evStart').value,u=readDur(),f=+$('evF').value;
   if(!D.d){toast('Pick at least one day');return}
   if(!st){toast('Pick a start time');return}
   if(u<1||u>1440){toast('Duration must be 1 min – 24 h');return}
-  if((D.fi||D.fo)&&(f<1||f>3600)){toast('Fade length: 1–3600 seconds');return}
+  if(!D.p&&(D.fi||D.fo)&&(f<1||f>3600)){toast('Fade length: 1–3600 seconds');return}
+  const iv=readIv();
+  if(D.p&&(iv.some(v=>v<0||v>3600)||iv.every(v=>v==0))){toast('Interval times: 0–3600 s, at least one above 0');return}
+  [D.iu,D.ih,D.id,D.io]=iv;
   const [h,m]=st.split(':').map(Number);
   Object.assign(D,{s:h*60+m,u,l:+$('evL').value,f:f||D.f});
   if(edit<0)EV.push(D);else EV[edit]=D;

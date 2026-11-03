@@ -8,6 +8,8 @@
  * - Clock is set from the phone (one tap) or entered manually.
  * - Optional DS3231 clock module keeps time through power cuts.
  * - Events: days, start time, duration, brightness, instant/fade on & off.
+ * - Interval pattern: inside an event, repeat fade up / stay on /
+ *   fade down / stay off (each length in seconds).
  * - Optional NTC thermistors limit brightness when the heatsink gets hot.
  *
  * Arduino IDE: board "ESP32C3 Dev Module", "USB CDC On Boot: Enabled".
@@ -57,9 +59,21 @@ struct Event {
   uint8_t fadeOut;   // 0 = instant off, 1 = fade out
   uint16_t fadeSec;  // fade length in seconds 1..3600
   uint8_t enabled;
+  uint8_t pattern;   // 0 = steady, 1 = interval
+  uint16_t upSec;    // interval: fade up   0..3600 s
+  uint16_t holdSec;  // interval: stay on   0..3600 s
+  uint16_t downSec;  // interval: fade down 0..3600 s
+  uint16_t offSec;   // interval: stay off  0..3600 s
 };
 
-// Older firmware stored the fade in minutes; used once to convert saved events.
+// Layouts saved by older firmware; used once to convert saved events.
+struct EventV2 {
+  uint8_t days, level;
+  uint16_t start, duration;
+  uint8_t fadeIn, fadeOut;
+  uint16_t fadeSec;
+  uint8_t enabled;
+};
 struct EventV1 {
   uint8_t days, level;
   uint16_t start, duration;
@@ -92,22 +106,30 @@ bool sensorFault = false;
 // ================= Storage =================
 void saveEvents() {
   prefs.begin("uvtimer2", false);
-  prefs.putBytes("events2", events, eventCount * sizeof(Event));
+  prefs.putBytes("events3", events, eventCount * sizeof(Event));
   prefs.end();
 }
 
 void loadSettings() {
   prefs.begin("uvtimer2", true);
-  eventCount = prefs.getBytes("events2", events, sizeof(events)) / sizeof(Event);
-  bool migrate = !prefs.isKey("events2") && prefs.isKey("events");
-  if (migrate) {                                 // convert minutes -> seconds
+  eventCount = prefs.getBytes("events3", events, sizeof(events)) / sizeof(Event);
+  bool migrate = false;
+  if (!prefs.isKey("events3") && prefs.isKey("events2")) {      // no interval fields yet
+    EventV2 old[MAX_EVENTS];
+    int n = min((int)(prefs.getBytes("events2", old, sizeof(old)) / sizeof(EventV2)), MAX_EVENTS);
+    for (int i = 0; i < n; i++)
+      events[i] = {old[i].days, old[i].level, old[i].start, old[i].duration, old[i].fadeIn,
+                   old[i].fadeOut, old[i].fadeSec, old[i].enabled, 0, 60, 0, 60, 60};
+    eventCount = n;
+    migrate = true;
+  } else if (!prefs.isKey("events3") && prefs.isKey("events")) { // fade was in minutes
     EventV1 old[MAX_EVENTS];
-    int n = prefs.getBytes("events", old, sizeof(old)) / sizeof(EventV1);
-    for (int i = 0; i < n && i < MAX_EVENTS; i++) {
-      events[i] = {old[i].days, old[i].level, old[i].start, old[i].duration,
-                   old[i].fadeIn, old[i].fadeOut, (uint16_t)(old[i].fadeMin * 60), old[i].enabled};
-    }
-    eventCount = min(n, MAX_EVENTS);
+    int n = min((int)(prefs.getBytes("events", old, sizeof(old)) / sizeof(EventV1)), MAX_EVENTS);
+    for (int i = 0; i < n; i++)
+      events[i] = {old[i].days, old[i].level, old[i].start, old[i].duration, old[i].fadeIn,
+                   old[i].fadeOut, (uint16_t)(old[i].fadeMin * 60), old[i].enabled, 0, 60, 0, 60, 60};
+    eventCount = n;
+    migrate = true;
   }
   mode = (Mode)prefs.getUChar("mode", MODE_AUTO);
   manualLevel = prefs.getUChar("mlevel", 100);
@@ -272,6 +294,19 @@ float eventLevel(const Event &e, int wday, double secOfDay) {
     if (!(e.days & (1 << d))) continue;
     float el = (float)(secOfDay + back * 86400.0 - e.start * 60.0);
     if (el < 0 || el >= dur) continue;
+    if (e.pattern == 1) {                        // interval: repeat the cycle
+      float up = e.upSec, hold = e.holdSec, down = e.downSec;
+      float cycle = up + hold + down + e.offSec;
+      if (cycle <= 0) continue;
+      float c = fmodf(el, cycle);
+      float env;
+      if (c < up) env = c / up;
+      else if (c < up + hold) env = 1;
+      else if (c < up + hold + down) env = 1 - (c - up - hold) / down;
+      else env = 0;
+      best = max(best, e.level * env * env);
+      continue;
+    }
     float fade = e.fadeSec;
     int fades = (e.fadeIn ? 1 : 0) + (e.fadeOut ? 1 : 0);
     if (fades && fade * fades > dur) fade = (float)dur / fades;
@@ -346,14 +381,17 @@ void handleState() {
     if (i) j += ",";
     j += "{\"d\":" + String(e.days) + ",\"s\":" + String(e.start) + ",\"u\":" + String(e.duration) +
          ",\"l\":" + String(e.level) + ",\"fi\":" + String(e.fadeIn) + ",\"fo\":" + String(e.fadeOut) +
-         ",\"f\":" + String(e.fadeSec) + ",\"on\":" + String(e.enabled) + "}";
+         ",\"f\":" + String(e.fadeSec) + ",\"on\":" + String(e.enabled) +
+         ",\"p\":" + String(e.pattern) + ",\"iu\":" + String(e.upSec) + ",\"ih\":" + String(e.holdSec) +
+         ",\"id\":" + String(e.downSec) + ",\"io\":" + String(e.offSec) + "}";
   }
   j += "]}";
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", j);
 }
 
-// body "e" = "days,start,duration,level,fadeIn,fadeOut,fadeSec,enabled;..."
+// body "e" = "days,start,duration,level,fadeIn,fadeOut,fadeSec,enabled,
+//              pattern,upSec,holdSec,downSec,offSec;..."
 void handleEvents() {
   String s = server.arg("e");
   Event tmp[MAX_EVENTS];
@@ -363,9 +401,9 @@ void handleEvents() {
     if (sep < 0) sep = s.length();
     String item = s.substring(pos, sep);
     pos = sep + 1;
-    long v[8];
+    long v[13] = {0, 0, 0, 0, 0, 0, 10, 1, 0, 60, 0, 60, 60};
     int k = 0, p = 0;
-    while (k < 8 && p <= (int)item.length()) {
+    while (k < 13 && p <= (int)item.length()) {
       int c = item.indexOf(',', p);
       if (c < 0) c = item.length();
       v[k++] = item.substring(p, c).toInt();
@@ -381,6 +419,12 @@ void handleEvents() {
     e.fadeOut = v[5] ? 1 : 0;
     e.fadeSec = constrain(v[6], 1, 3600);
     e.enabled = v[7] ? 1 : 0;
+    e.pattern = v[8] ? 1 : 0;
+    e.upSec = constrain(v[9], 0, 3600);
+    e.holdSec = constrain(v[10], 0, 3600);
+    e.downSec = constrain(v[11], 0, 3600);
+    e.offSec = constrain(v[12], 0, 3600);
+    if (e.pattern && e.upSec + e.holdSec + e.downSec + e.offSec == 0) e.pattern = 0;
   }
   memcpy(events, tmp, sizeof(Event) * n);
   eventCount = n;
